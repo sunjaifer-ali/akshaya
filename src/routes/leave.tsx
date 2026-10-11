@@ -1,0 +1,496 @@
+import { createFileRoute } from "@tanstack/react-router";
+import * as Popover from "@radix-ui/react-popover";
+import { format } from "date-fns";
+import { useEffect, useState } from "react";
+import { MonthBar } from "@/components/month-bar";
+import { PageHeader } from "@/components/page-header";
+import { Button } from "@/components/ui/button";
+import { presentDays, leaveTally } from "@/lib/ledger/calc";
+import { datesInMonth, formatDay, formatFull, formatMonth, formatMonthShort, isSunday, parseDate } from "@/lib/ledger/dates";
+import { useLedger } from "@/lib/ledger/store";
+import { LEAVE_LABEL, type Employee, type LeaveCode, type LeaveMark } from "@/lib/ledger/types";
+import { readMonth } from "@/lib/search";
+import { useResolvedMonth, useTodayKey } from "@/lib/use-today";
+import { cn } from "@/lib/cn";
+
+export const Route = createFileRoute("/leave")({
+  validateSearch: readMonth,
+  component: LeavePage,
+});
+
+const CHOICES: { code: LeaveCode | null; label: string }[] = [
+  { code: null, label: "Present" },
+  { code: "CL", label: "Casual leave" },
+  { code: "SL", label: "Sick leave" },
+  { code: "LWP", label: "Unpaid leave" },
+  { code: "HD", label: "Half day" },
+  { code: "WO", label: "Weekly off" },
+];
+
+function LeavePage() {
+  const search = Route.useSearch();
+  const navigate = Route.useNavigate();
+  const month = useResolvedMonth(search.m ?? "");
+  const today = useTodayKey();
+  const book = useLedger();
+  const dates = datesInMonth(month);
+  const people = book.employees.filter((employee) => {
+    if (employee.active) return true;
+    return book.leaves.some((mark) => mark.employeeId === employee.id && mark.date.startsWith(month));
+  });
+
+  return (
+    <div>
+      <div className="no-print">
+      <PageHeader
+        kicker="ATTENDANCE"
+        title="Leave register"
+        lede="Sundays are holidays. Tap a date number to mark any other holiday. On a finished working day, anyone with no collection is marked unpaid leave."
+        actions={
+          <MonthBar
+            month={month}
+            onChange={(next) => {
+              void navigate({ search: { m: next } });
+            }}
+          />
+        }
+      />
+
+      {people.length === 0 ? (
+        <p className="rounded-xl border border-line bg-surface p-5 text-sm text-muted">Add staff on the Salary page before marking leave.</p>
+      ) : (
+        <div className="overflow-x-auto rounded-xl border border-line bg-surface">
+          <table className="border-collapse text-sm">
+            <caption className="sr-only">Day wise leave for {month}</caption>
+            <thead>
+              <tr>
+                <th className="sticky left-0 z-10 bg-surface px-3 py-2 text-left text-xs font-medium text-faint">Staff</th>
+                {dates.map((date) => {
+                  const sunday = isSunday(date);
+                  const holiday = book.holidays.includes(date);
+                  return (
+                    <th key={date} className="p-1 font-medium">
+                      <button
+                        type="button"
+                        disabled={sunday}
+                        aria-label={sunday ? `${formatDay(date)} Sunday holiday` : `Toggle holiday on ${formatDay(date)}`}
+                        className={cn(
+                          "flex size-11 flex-col items-center justify-center gap-0.5 rounded-sm text-xs leading-none",
+                          sunday || holiday ? "bg-warn-soft text-warn" : "hover:bg-surface-2",
+                        )}
+                        onClick={() => book.toggleHoliday(date)}
+                      >
+                        <span className="tabular-nums">{date.slice(8)}</span>
+                        <span>{sunday || holiday ? "H" : ""}</span>
+                      </button>
+                    </th>
+                  );
+                })}
+              </tr>
+            </thead>
+            <tbody>
+              {people.map((employee) => (
+                <tr key={employee.id} className="border-t border-line">
+                  <th className="sticky left-0 z-10 bg-surface px-3 py-2 text-left font-medium">{employee.name}</th>
+                  {dates.map((date) => (
+                    <td key={date} className="p-1">
+                      <DayCell employeeId={employee.id} employeeName={employee.name} date={date} />
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <ul className="mt-3 flex flex-wrap gap-2 text-xs text-muted">
+        <li className="rounded-sm bg-accent-soft px-2 py-1 text-accent">CL casual</li>
+        <li className="rounded-sm bg-warn-soft px-2 py-1 text-warn">SL sick</li>
+        <li className="rounded-sm bg-bad-soft px-2 py-1 text-bad">LWP unpaid</li>
+        <li className="rounded-sm bg-surface-2 px-2 py-1">HD half · WO off · H holiday</li>
+      </ul>
+
+      {people.length > 0 ? (
+        <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {people.map((employee) => {
+            const tally = leaveTally(book.leaves, employee.id, month);
+            const present = presentDays(book.leaves, employee.id, month, book.holidays);
+            return (
+              <article key={employee.id} className="rounded-xl border border-line bg-surface p-5">
+                <h2 className="font-medium">{employee.name}</h2>
+                <dl className="mt-2 grid grid-cols-2 gap-y-1 text-sm">
+                  <dt className="text-muted">Present</dt>
+                  <dd className="text-right tabular-nums">{present}</dd>
+                  <dt className="text-muted">Casual</dt>
+                  <dd className="text-right tabular-nums">{tally.CL}</dd>
+                  <dt className="text-muted">Sick</dt>
+                  <dd className="text-right tabular-nums">{tally.SL}</dd>
+                  <dt className="text-muted">Unpaid</dt>
+                  <dd className="text-right tabular-nums">{tally.LWP}</dd>
+                  <dt className="text-muted">Half days</dt>
+                  <dd className="text-right tabular-nums">{tally.HD}</dd>
+                </dl>
+              </article>
+            );
+          })}
+        </div>
+      ) : null}
+      </div>
+
+      {people.length > 0 ? (
+        <AttendanceReport
+          centre={book.centreName}
+          month={month}
+          today={today}
+          people={people}
+          leaves={book.leaves}
+          holidays={book.holidays}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+function AttendanceReport({
+  centre,
+  month,
+  today,
+  people,
+  leaves,
+  holidays,
+}: {
+  centre: string;
+  month: string;
+  today: string;
+  people: Employee[];
+  leaves: LeaveMark[];
+  holidays: string[];
+}) {
+  const opening = today.startsWith(month) ? today : `${month}-01`;
+  const [date, setDate] = useState(opening);
+  const [picked, setPicked] = useState(false);
+  useEffect(() => {
+    if (!picked) setDate(today.startsWith(month) ? today : `${month}-01`);
+  }, [today, month, picked]);
+
+  const reportMonth = date.slice(0, 7);
+  const year = Number(date.slice(0, 4));
+  const dates = datesInMonth(reportMonth);
+  const months = calendarMonths(year);
+  const years = yearChoices(year, today);
+  const rows = people.map((employee) => ({
+    employee,
+    month: countAttendance(leaves, employee.id, reportMonth, holidays, today),
+    year: months.map((item) => countAttendance(leaves, employee.id, item, holidays, today)),
+  }));
+
+  const chooseDate = (next: string) => {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(next)) return;
+    setPicked(true);
+    setDate(clampDate(next));
+  };
+
+  return (
+    <article className="report-sheet mt-8 border-t border-line pt-6">
+      <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <p className="text-xs font-semibold tracking-widest text-accent">ATTENDANCE REPORT</p>
+          <h2 className="font-display text-3xl leading-tight">{centre}</h2>
+          <p className="mt-1 text-sm text-muted">
+            {formatFull(date)}. {formatMonth(reportMonth)} attendance, and leave for {year}.
+          </p>
+        </div>
+        <Button className="no-print" onClick={() => window.print()}>
+          Print report
+        </Button>
+      </div>
+      <div className="no-print mb-4 flex flex-wrap items-end gap-3">
+        <label className="block text-sm">
+          <span className="mb-1 block text-muted">Date</span>
+          <input
+            type="date"
+            aria-label="Report date"
+            className="h-11 rounded-sm border border-line bg-bg px-3 text-base text-ink outline-none focus:border-accent"
+            value={date}
+            onChange={(event) => {
+              if (event.target.value) chooseDate(event.target.value);
+            }}
+          />
+        </label>
+        <label className="block text-sm">
+          <span className="mb-1 block text-muted">Month</span>
+          <input
+            type="month"
+            aria-label="Report month"
+            className="h-11 rounded-sm border border-line bg-bg px-3 text-base text-ink outline-none focus:border-accent"
+            value={reportMonth}
+            onChange={(event) => {
+              if (event.target.value) chooseDate(shiftMonth(date, event.target.value));
+            }}
+          />
+        </label>
+        <label className="block text-sm">
+          <span className="mb-1 block text-muted">Year</span>
+          <select
+            aria-label="Report year"
+            className="h-11 rounded-sm border border-line bg-bg px-3 text-base text-ink outline-none focus:border-accent"
+            value={String(year)}
+            onChange={(event) => chooseDate(shiftYear(date, Number(event.target.value)))}
+          >
+            {years.map((item) => (
+              <option key={item} value={item}>
+                {item}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+      <p className="no-print mb-4 text-xs text-faint">Print or save as PDF to share. Landscape A4 keeps the days on one page.</p>
+
+      <h3 className="font-medium">{formatFull(date)}</h3>
+      <ul className="mt-2 divide-y divide-line rounded-xl border border-line bg-surface">
+        {people.map((employee) => (
+          <li key={employee.id} className="flex items-center justify-between gap-3 px-3 py-2 text-sm">
+            <span className="font-medium">{employee.name}</span>
+            <span className="text-muted">{dayLabel(leaves, employee.id, date, holidays, today)}</span>
+          </li>
+        ))}
+      </ul>
+
+      <h3 className="mt-6 font-medium">{formatMonth(reportMonth)}</h3>
+      <div className="mt-2 overflow-x-auto rounded-xl border border-line bg-surface">
+        <table className="border-collapse text-xs">
+          <caption className="sr-only">Monthly attendance for {formatMonth(month)}</caption>
+          <thead>
+            <tr className="border-b border-line text-faint">
+              <th className="sticky left-0 bg-surface px-2 py-2 text-left font-medium">Staff</th>
+              {dates.map((date) => (
+                <th key={date} className="px-1 py-2 text-center font-medium tabular-nums">
+                  {Number(date.slice(8))}
+                </th>
+              ))}
+              <th className="px-2 py-2 text-right font-medium">P</th>
+              <th className="px-2 py-2 text-right font-medium">CL</th>
+              <th className="px-2 py-2 text-right font-medium">SL</th>
+              <th className="px-2 py-2 text-right font-medium">LWP</th>
+              <th className="px-2 py-2 text-right font-medium">HD</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => (
+              <tr key={row.employee.id} className="border-b border-line last:border-0">
+                <th className="sticky left-0 bg-surface px-2 py-2 text-left font-medium">{row.employee.name}</th>
+                {dates.map((date) => (
+                  <td key={date} className="px-1 py-2 text-center tabular-nums text-muted">
+                    {dayMark(leaves, row.employee.id, date, holidays, today)}
+                  </td>
+                ))}
+                <td className="px-2 py-2 text-right tabular-nums">{trimHalf(row.month.present)}</td>
+                <td className="px-2 py-2 text-right tabular-nums">{row.month.tally.CL}</td>
+                <td className="px-2 py-2 text-right tabular-nums">{row.month.tally.SL}</td>
+                <td className="px-2 py-2 text-right tabular-nums">{row.month.tally.LWP}</td>
+                <td className="px-2 py-2 text-right tabular-nums">{row.month.tally.HD}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <h3 className="mt-6 font-medium">Leave dates this month</h3>
+      <ul className="mt-2 divide-y divide-line rounded-xl border border-line bg-surface">
+        {rows.map((row) => (
+          <li key={row.employee.id} className="flex flex-wrap items-baseline justify-between gap-2 px-3 py-2 text-sm">
+            <span className="font-medium">{row.employee.name}</span>
+            <span className="text-muted">{row.month.dates.length > 0 ? row.month.dates.join(", ") : "No leave marked"}</span>
+          </li>
+        ))}
+      </ul>
+
+      <h3 className="mt-6 font-medium">Yearly leave, {year}</h3>
+      <div className="mt-2 overflow-x-auto rounded-xl border border-line bg-surface">
+        <table className="w-full text-left text-xs">
+          <caption className="sr-only">Yearly leave statement for {year}</caption>
+          <thead>
+            <tr className="border-b border-line text-faint">
+              <th className="sticky left-0 bg-surface px-2 py-2 font-medium">Staff</th>
+              {months.map((item) => (
+                <th key={item} className="px-2 py-2 font-medium whitespace-nowrap">
+                  {formatMonthShort(item)}
+                </th>
+              ))}
+              <th className="px-2 py-2 text-right font-medium">CL</th>
+              <th className="px-2 py-2 text-right font-medium">SL</th>
+              <th className="px-2 py-2 text-right font-medium">LWP</th>
+              <th className="px-2 py-2 text-right font-medium">HD</th>
+              <th className="px-2 py-2 text-right font-medium">Present</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => {
+              const total = row.year.reduce(
+                (sum, item) => ({
+                  CL: sum.CL + item.tally.CL,
+                  SL: sum.SL + item.tally.SL,
+                  LWP: sum.LWP + item.tally.LWP,
+                  HD: sum.HD + item.tally.HD,
+                  present: sum.present + item.present,
+                }),
+                { CL: 0, SL: 0, LWP: 0, HD: 0, present: 0 },
+              );
+              return (
+                <tr key={row.employee.id} className="border-b border-line last:border-0">
+                  <th className="sticky left-0 bg-surface px-2 py-2 text-left font-medium">{row.employee.name}</th>
+                  {row.year.map((item, index) => (
+                    <td key={months[index]} className="px-2 py-2 whitespace-nowrap text-muted">
+                      {leaveText(item.tally)}
+                    </td>
+                  ))}
+                  <td className="px-2 py-2 text-right tabular-nums">{total.CL}</td>
+                  <td className="px-2 py-2 text-right tabular-nums">{total.SL}</td>
+                  <td className="px-2 py-2 text-right tabular-nums">{total.LWP}</td>
+                  <td className="px-2 py-2 text-right tabular-nums">{total.HD}</td>
+                  <td className="px-2 py-2 text-right tabular-nums">{trimHalf(total.present)}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </article>
+  );
+}
+
+function dayLabel(leaves: LeaveMark[], employeeId: string, date: string, holidays: string[], today: string): string {
+  const mark = dayMark(leaves, employeeId, date, holidays, today);
+  if (mark === "H") return "Holiday";
+  if (mark === "P") return "Present";
+  if (!mark) return "—";
+  return LEAVE_LABEL[mark as LeaveCode] ?? mark;
+}
+
+function calendarMonths(year: number): string[] {
+  return Array.from({ length: 12 }, (_, index) => `${year}-${String(index + 1).padStart(2, "0")}`);
+}
+
+function yearChoices(selected: number, today: string): number[] {
+  const current = Number((today || "2026-01-01").slice(0, 4));
+  const start = Math.min(2024, selected);
+  const end = Math.max(current + 1, selected);
+  const years: number[] = [];
+  for (let year = start; year <= end; year += 1) years.push(year);
+  return years;
+}
+
+function shiftMonth(date: string, month: string): string {
+  return clampDate(`${month}-${date.slice(8)}`);
+}
+
+function shiftYear(date: string, year: number): string {
+  return clampDate(`${year}-${date.slice(5)}`);
+}
+
+function clampDate(date: string): string {
+  const month = date.slice(0, 7);
+  const last = datesInMonth(month).length;
+  const day = Math.min(Math.max(Number(date.slice(8)) || 1, 1), last);
+  return `${month}-${String(day).padStart(2, "0")}`;
+}
+
+function dayMark(leaves: LeaveMark[], employeeId: string, date: string, holidays: string[], today: string): string {
+  if (isSunday(date) || holidays.includes(date)) return "H";
+  const mark = leaves.find((item) => item.employeeId === employeeId && item.date === date);
+  if (mark) return mark.code;
+  if (today && date > today) return "";
+  return "P";
+}
+
+function countAttendance(leaves: LeaveMark[], employeeId: string, month: string, holidays: string[], today: string) {
+  const tally: Record<LeaveCode, number> = { CL: 0, SL: 0, LWP: 0, HD: 0, WO: 0 };
+  const dates: string[] = [];
+  let working = 0;
+  let off = 0;
+  for (const date of datesInMonth(month)) {
+    const closed = isSunday(date) || holidays.includes(date);
+    const mark = leaves.find((item) => item.employeeId === employeeId && item.date === date);
+    if (mark && !closed) {
+      tally[mark.code] += 1;
+      dates.push(`${format(parseDate(date), "d MMM")} ${mark.code}`);
+    }
+    const elapsed = !today || date <= today;
+    if (!elapsed || closed) continue;
+    working += 1;
+    if (!mark) continue;
+    off += mark.code === "HD" ? 0.5 : 1;
+  }
+  return { tally, dates, present: Math.max(0, Math.round((working - off) * 2) / 2) };
+}
+
+function leaveText(tally: Record<LeaveCode, number>): string {
+  const parts: string[] = [];
+  if (tally.CL) parts.push(`${tally.CL} CL`);
+  if (tally.SL) parts.push(`${tally.SL} SL`);
+  if (tally.LWP) parts.push(`${tally.LWP} LWP`);
+  if (tally.HD) parts.push(`${tally.HD} HD`);
+  if (tally.WO) parts.push(`${tally.WO} WO`);
+  return parts.length > 0 ? parts.join(" · ") : "—";
+}
+
+function trimHalf(n: number): string {
+  return Number.isInteger(n) ? String(n) : n.toFixed(1);
+}
+
+function DayCell({
+  employeeId,
+  employeeName,
+  date,
+}: {
+  employeeId: string;
+  employeeName: string;
+  date: string;
+}) {
+  const holidays = useLedger((state) => state.holidays);
+  const mark = useLedger((state) => state.leaves.find((item) => item.employeeId === employeeId && item.date === date));
+  const setLeave = useLedger((state) => state.setLeave);
+  const sunday = isSunday(date);
+  const holiday = holidays.includes(date);
+
+  if (sunday || holiday) {
+    return (
+      <span className="flex size-11 items-center justify-center text-xs text-faint">H</span>
+    );
+  }
+
+  const code = mark?.code ?? null;
+  return (
+    <Popover.Root>
+      <Popover.Trigger
+        className={cn("size-11 rounded-sm text-xs font-medium", tone(code))}
+        aria-label={`${employeeName}, ${formatDay(date)}, ${code ? LEAVE_LABEL[code] : "Present"}`}
+      >
+        {code ?? "·"}
+      </Popover.Trigger>
+      <Popover.Portal>
+        <Popover.Content className="z-40 w-44 rounded-lg border border-line bg-surface p-1 shadow-none" sideOffset={6}>
+          {CHOICES.map((choice) => (
+            <Popover.Close
+              key={choice.label}
+              className="flex min-h-11 w-full items-center rounded-sm px-3 text-left text-sm hover:bg-surface-2"
+              onClick={() => setLeave(employeeId, date, choice.code)}
+            >
+              {choice.label}
+            </Popover.Close>
+          ))}
+        </Popover.Content>
+      </Popover.Portal>
+    </Popover.Root>
+  );
+}
+
+function tone(code: LeaveCode | null): string {
+  if (code === "CL") return "bg-accent-soft text-accent";
+  if (code === "SL") return "bg-warn-soft text-warn";
+  if (code === "LWP") return "bg-bad-soft text-bad";
+  if (code === "HD" || code === "WO") return "bg-surface-2 text-ink";
+  return "text-faint hover:bg-surface-2";
+}

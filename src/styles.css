@@ -1,0 +1,216 @@
+@import "tailwindcss";
+
+@theme {
+  --color-bg: #f3f1ec;
+  --color-surface: #fbfaf7;
+  --color-surface-2: #eeece6;
+  --color-ink: #1c1b19;
+  --color-muted: #5c574f;
+  --color-faint: #847e74;
+  --color-line: #e3ddd3;
+  --color-line-strong: #d0c9bc;
+  --color-accent: #1e6b43;
+  --color-accent-ink: #f7f6f3;
+  --color-accent-soft: #e4f0e9;
+  --color-warn: #8a5a12;
+  --color-warn-soft: #f6edd9;
+  --color-bad: #8d3a32;
+  --color-bad-soft: #f8e8e6;
+  --font-display: "Newsreader", "Iowan Old Style", Georgia, serif;
+  --font-sans: "Source Sans 3", "Segoe UI", sans-serif;
+  --radius-xs: 4px;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 20px;
+  --radius-xl: 28px;
+}
+
+:root {
+  --motion-quick: 150ms;
+  --motion-fast: 250ms;
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-smooth: cubic-bezier(0.22, 1, 0.36, 1);
+  --shadow-panel: 0 16px 40px color-mix(in oklab, var(--color-ink) 8%, transparent);
+}
+
+@layer base {
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    color-scheme: light;
+    background: var(--color-bg);
+  }
+
+  body {
+    margin: 0;
+    min-height: 100dvh;
+    background: var(--color-bg);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    font-size: 1rem;
+    line-height: 1.5;
+  }
+
+  h1,
+  h2,
+  h3 {
+    text-wrap: balance;
+  }
+
+  p {
+    text-wrap: pretty;
+  }
+
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+
+  input,
+  select,
+  textarea {
+    font: inherit;
+  }
+}
+
+.safe-bottom {
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+.bg-surface.rounded-xl {
+  box-shadow: 0 1px 2px color-mix(in oklab, var(--color-ink) 4%, transparent);
+}
+
+.modal-panel {
+  width: min(calc(100% - 2rem), 32rem);
+  max-height: min(calc(100dvh - 2rem), 40rem);
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes modal-in {
+  from { opacity: 0; transform: translate(-50%, -48%) scale(0.96); }
+  to { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+}
+
+.modal-overlay[data-state="open"] {
+  animation: fade-in var(--motion-fast) var(--ease-smooth);
+}
+
+.modal-panel[data-state="open"] {
+  animation: modal-in var(--motion-fast) var(--ease-smooth);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .modal-overlay[data-state="open"],
+  .modal-panel[data-state="open"] {
+    animation: none;
+  }
+}
+
+@page {
+  size: A4 landscape;
+  margin: 8mm;
+}
+
+@page landscape-sheet {
+  size: A4 landscape;
+  margin: 8mm;
+}
+
+@page salary {
+  size: A4 portrait;
+  margin: 14mm;
+}
+
+@media print {
+
+  html,
+  body {
+    background: white !important;
+    overflow: visible !important;
+    height: auto !important;
+  }
+
+  .no-print,
+  .print-chart {
+    display: none !important;
+  }
+
+  details.short-report > :not(summary) {
+    display: block !important;
+  }
+
+  .print-shell {
+    padding: 0 !important;
+  }
+
+  main {
+    max-width: none !important;
+    padding: 0 !important;
+    overflow: visible !important;
+  }
+
+  .overflow-x-auto {
+    overflow: visible !important;
+  }
+
+  table {
+    min-width: 0 !important;
+    width: 100% !important;
+    font-size: 8px !important;
+    border-collapse: collapse;
+  }
+
+  th,
+  td {
+    padding: 2px 3px !important;
+    white-space: normal;
+  }
+
+  .tabular-nums {
+    white-space: nowrap !important;
+  }
+
+  tr {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  .sticky {
+    position: static !important;
+  }
+
+  .print-stats {
+    display: grid !important;
+    grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+    break-inside: avoid;
+  }
+
+  .print-keep {
+    break-inside: avoid;
+  }
+
+  .salary-slip,
+  .month-note {
+    break-after: page;
+    page: salary;
+  }
+
+  .salary-slip:last-child,
+  .month-note:last-child {
+    break-after: auto;
+  }
+
+  .report-sheet {
+    page: landscape-sheet;
+  }
+
+  main:has(.salary-slip) > img,
+  main:has(.month-note) > img {
+    display: none !important;
+  }
+}
