@@ -115,16 +115,21 @@ const baseURL = explicitBaseURL ?? {
 
 // Origins Better Auth accepts on credentialed POSTs (sign-up/sign-in, etc.).
 // Missing entries here surface as FORBIDDEN "Invalid origin".
+// Always trust Vercel domains so deployments work without extra env config.
+const VERCEL_ORIGINS = [
+  "*.vercel.app",
+  "https://*.vercel.app",
+  "http://*.vercel.app",
+];
+
 const trustedOrigins: string[] = explicitBaseURL
-  ? [explicitBaseURL, ...LOCAL_DEV_ORIGINS]
+  ? [explicitBaseURL, ...LOCAL_DEV_ORIGINS, ...VERCEL_ORIGINS]
   : [
-      // Host wildcards (matched against Origin's host)
       ...previewAllowedHosts,
-      // Full-origin wildcards (matched against Origin)
       ...previewAllowedHosts.flatMap((host) => [`https://${host}`, `http://${host}`]),
       ...LOCAL_DEV_ORIGINS,
+      ...VERCEL_ORIGINS,
     ];
-
 const databaseUrl = env("DATABASE_URL");
 
 // Static broker OAuth endpoints (skip OIDC discovery on every sign-in / callback).
