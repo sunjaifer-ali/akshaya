@@ -172,14 +172,14 @@ export function lastYearFigure(
   month: string,
   asOf = "",
 ): { amount: number | null; source: "book" | "entered" | "none"; partial: boolean } {
-  if (Object.prototype.hasOwnProperty.call(lyOverrides, month)) {
-    return { amount: lyOverrides[month] ?? 0, source: "entered", partial: false };
-  }
   const prior = lastYearMonth(month);
   const inProgress = Boolean(asOf) && asOf.slice(0, 7) === month;
   const bookDays = monthDays(days, prior).filter((day) => !inProgress || day.date.slice(8) <= asOf.slice(8));
   const book = bookDays.reduce((sum, day) => sum + day.amount, 0);
   if (book > 0) return { amount: book, source: "book", partial: inProgress };
+  if (Object.prototype.hasOwnProperty.call(lyOverrides, month)) {
+    return { amount: lyOverrides[month] ?? 0, source: "entered", partial: false };
+  }
   return { amount: null, source: "none", partial: inProgress };
 }
 

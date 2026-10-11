@@ -8,6 +8,7 @@ import {
   ClipboardList,
   IndianRupee,
   PenLine,
+  Smartphone,
   NotebookPen,
   Notebook,
   ArrowLeftRight,
@@ -37,6 +38,7 @@ import { useMounted } from "@/lib/use-mounted";
 const NAV = [
   { to: "/", label: "Desk", icon: BookOpen, group: "Today", mobile: true },
   { to: "/counter", label: "Counter", icon: PenLine, group: "Today", mobile: true },
+  { to: "/gpay", label: "GPay", icon: Smartphone, group: "Today", mobile: false },
   { to: "/payments", label: "Payments", icon: Banknote, group: "Today", mobile: true },
   { to: "/closing", label: "Closing", icon: Calculator, group: "Today", mobile: true },
   { to: "/credit", label: "Credit and advances", icon: ArrowLeftRight, group: "Today", mobile: true },
@@ -56,6 +58,7 @@ const GROUPS = ["Today", "Money", "People", "Review"] as const;
 const MORE_LABEL: Record<(typeof NAV)[number]["to"], string> = {
   "/": "Desk",
   "/counter": "Live counter",
+  "/gpay": "Personal GPay",
   "/payments": "Payments",
   "/credit": "Credit and advances",
   "/diary": "Diary",
@@ -179,12 +182,12 @@ export function Shell({ children }: { children: ReactNode }) {
     );
   }
 
-  if (role === "employee" && pathname !== "/counter" && pathname !== "/credit" && pathname !== "/note" && pathname !== "/payments" && pathname !== "/diary") return <Navigate to="/counter" />;
+  if (role === "employee" && pathname !== "/counter" && pathname !== "/credit" && pathname !== "/note" && pathname !== "/payments" && pathname !== "/diary" && pathname !== "/gpay") return <Navigate to="/counter" />;
   if (role === "closer" && pathname !== "/closing" && pathname !== "/counter") return <Navigate to="/closing" />;
 
   const links =
     role === "employee"
-      ? NAV.filter((item) => item.to === "/counter" || item.to === "/payments" || item.to === "/credit" || item.to === "/diary" || item.to === "/note")
+      ? NAV.filter((item) => item.to === "/counter" || item.to === "/payments" || item.to === "/credit" || item.to === "/diary" || item.to === "/note" || item.to === "/gpay")
       : role === "closer"
         ? NAV.filter((item) => item.to === "/counter" || item.to === "/closing")
         : NAV.filter((item) => item.to !== "/payments");

@@ -103,12 +103,7 @@ const LOCAL_DEV_ORIGINS: string[] = [
   "http://127.0.0.1:8080",
   "http://[::1]:8080",
 ];
-// Always trust Vercel domains so deployments work without extra env config.
-const VERCEL_ORIGINS = [
-  "*.vercel.app",
-  "https://*.vercel.app",
-  "http://*.vercel.app",
-];
+const VERCEL_ORIGINS = ["*.vercel.app", "https://*.vercel.app", "http://*.vercel.app"];
 const baseURL = explicitBaseURL ?? {
   // Include loopback hosts so dynamic baseURL resolves for local email/password
   // (not only the preview wildcard).

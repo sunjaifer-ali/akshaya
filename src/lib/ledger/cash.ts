@@ -116,8 +116,8 @@ export function moneyInHand(row: CashClose): number {
 }
 
 function closeBase(row: CashClose): number {
-  if (row.creditSeparate) return moneyInHand(row);
-  return closingTotal(row);
+  // Credit is not cash. A customer who has not paid must not change the closing figure.
+  return moneyInHand(row);
 }
 
 export function previousClose(rows: CashClose[], date: string): CashClose | null {
@@ -208,9 +208,20 @@ export function checkClose(
   const spanRows = [...closes.filter((item) => span.includes(item.date) && item.date !== row.date), row];
   const creditGiven = spanRows.reduce((sum, item) => sum + creditGivenTotal(item), 0);
   const creditPaid = spanRows.reduce((sum, item) => sum + creditPaidTotal(item), 0);
-  let raw = movement - (known - personalGpay) - gap.advanceChange + gap.profitTaken + paidOut + bankDepartment - creditPaid;
-  let difference = raw < 0 ? Math.min(0, raw + creditGiven) : raw;
-  if (difference > 0 && creditGiven > 0) difference = Math.max(0, difference - creditGiven);
+  const creditOnCounter = span.reduce((sum, date) => sum + (days.find((item) => item.date === date)?.creditService ?? 0), 0);
+  // A credit is one whole bill. The customer did not pay, so that bill is not cash in the centre.
+  // Take it out of the counter, then add the whole bill once. The closing total that balances drops by the full credit.
+  const room = Math.max(0, known - personalGpay);
+  // Name-matched service charge of a credit is not cash. If the only counter amount is the credit itself, that is not cash either.
+  // The whole credit is added once below, so the two no longer cancel and the excess no longer ignores the bill.
+  const matched = Math.min(Math.max(creditOnCounter, 0), room);
+  const sameBill = matched === 0 && creditGiven > 0 && room === creditGiven ? creditGiven : matched;
+  const serviceInCentre = room - sameBill;
+  const departmentOut = Math.max(bankDepartment, departmentGpay);
+  const advanceIn =
+    typeof row.advanceIn === "number" ? Math.max(0, row.advanceIn) : Math.max(0, gap.advanceChange + (row.advanceServed ?? 0));
+  const difference =
+    movement - serviceInCentre + departmentOut + creditGiven - creditPaid - advanceIn + gap.profitTaken + paidOut;
   return {
     last: previous,
     lastDate: last.date,

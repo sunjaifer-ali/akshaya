@@ -5,7 +5,7 @@ import { PageHeader } from "@/components/page-header";
 import { chartColors } from "@/lib/chart-colors";
 import { cn } from "@/lib/cn";
 import { inr, signedInr } from "@/lib/format";
-import { diaryDesk, advanceDesk } from "@/lib/centre.functions";
+import { diaryDesk, advanceDesk, customerCreditDesk, type OpenCredit } from "@/lib/centre.functions";
 import { accountLines, aewsCollection, checkClose, unpaidCreditReport } from "@/lib/ledger/cash";
 import { centreSnapshot, monthCollection, staffMonthRows } from "@/lib/ledger/calc";
 import { addDays, formatDay, formatFull, formatMonthShort, fyMonths, fyStartYear, isSunday } from "@/lib/ledger/dates";
@@ -22,6 +22,8 @@ function DeskPage() {
   const book = useLedger();
   const [diaryOpen, setDiaryOpen] = useState(0);
   const [advanceHeld, setAdvanceHeld] = useState(0);
+  const [warnDays, setWarnDays] = useState(7);
+  const [liveOpen, setLiveOpen] = useState<OpenCredit[] | null>(null);
   const mounted = useMounted();
   const snap = centreSnapshot(
     book.employees,
@@ -65,6 +67,12 @@ function DeskPage() {
   const check = close ? checkClose(close, book.cashCloses, book.days, book.holidays, book.payouts ?? []) : null;
   const closeWord = closeWordOf(check);
   const review = today ? morningReview(book, today) : [];
+  const creditLines = liveOpen
+    ? liveOpen.map((line) => ({ date: line.date, customer: line.customer, staff: line.staff, balance: line.balance }))
+    : unpaidCreditReport(book.cashCloses, (id) => book.employees.find((employee) => employee.id === id)?.name ?? "Staff").lines;
+  const oldCutoff = today ? addDays(today, -warnDays) : "";
+  const oldCredit = creditLines.filter((line) => line.date && line.balance > 0 && line.date <= oldCutoff);
+  const oldTotal = oldCredit.reduce((sum, line) => sum + line.balance, 0);
   const attention = diaryOpen > 0 ? [...review, { text: `Diary · ${diaryOpen} open`, tone: "warn" as const, to: "/diary" as const }] : review;
   if (advanceHeld > 0) attention.push({ text: `Advance still to serve ${inr(advanceHeld)}`, tone: "warn", to: "/credit" });
 
@@ -76,7 +84,15 @@ function DeskPage() {
     void advanceDesk()
       .then((desk) => setAdvanceHeld(desk.held))
       .catch(() => undefined);
+    void customerCreditDesk({ data: month })
+      .then((desk) => setLiveOpen(desk.open))
+      .catch(() => setLiveOpen(null));
   }, [today]);
+
+  useEffect(() => {
+    const saved = Number(window.localStorage.getItem("credit-old-days"));
+    if (Number.isFinite(saved) && saved >= 1 && saved <= 365) setWarnDays(saved);
+  }, []);
 
   return (
     <div>
@@ -88,9 +104,7 @@ function DeskPage() {
 
       <section className="mt-4 rounded-xl border border-line bg-surface p-5">
         <h2 className="font-display text-2xl">Needs attention</h2>
-        {!mounted || attention.length === 0 ? (
-          <p className="mt-2 text-sm text-muted">{mounted ? "Nothing outstanding." : "Checking the book…"}</p>
-        ) : (
+        {attention.length > 0 ? (
           <ul className="mt-2 divide-y divide-line">
             {attention.map((item) => (
               <li key={item.text}>
@@ -98,7 +112,49 @@ function DeskPage() {
               </li>
             ))}
           </ul>
-        )}
+        ) : !mounted || oldCredit.length === 0 ? (
+          <p className="mt-2 text-sm text-muted">{mounted ? "Nothing outstanding." : "Checking the book…"}</p>
+        ) : null}
+        <div className="mt-4 flex flex-wrap items-center gap-3 border-t border-line pt-4">
+          <label className="flex items-center gap-2 text-sm">
+            Credit older than
+            <input
+              type="number"
+              min={1}
+              max={365}
+              aria-label="Days before a credit is shown"
+              className="h-11 w-20 rounded-sm border border-line bg-bg px-3 text-right text-base tabular-nums outline-none focus:border-accent"
+              value={warnDays}
+              onChange={(event) => {
+                const next = Math.min(365, Math.max(1, Math.round(Number(event.target.value) || 1)));
+                setWarnDays(next);
+                window.localStorage.setItem("credit-old-days", String(next));
+              }}
+            />
+            days
+          </label>
+          <p className="text-sm font-medium tabular-nums">{oldCredit.length === 0 ? "None" : `${oldCredit.length} · ${inr(oldTotal)}`}</p>
+        </div>
+        {oldCredit.length > 0 ? (
+          <ul className="divide-y divide-line">
+            {oldCredit.slice(0, 8).map((line) => (
+              <li key={`${line.date}-${line.customer}-${line.balance}`}>
+                <ReviewLink
+                  item={{
+                    tone: "bad",
+                    text: `${line.customer || "A customer"} still owes ${inr(line.balance)} from ${formatDay(line.date)}${line.staff ? `, ${line.staff}` : ""}.`,
+                    to: "/credit",
+                  }}
+                />
+              </li>
+            ))}
+            {oldCredit.length > 8 ? (
+              <li>
+                <ReviewLink item={{ tone: "warn", text: `${oldCredit.length - 8} more credits are older than ${warnDays} days.`, to: "/credit" }} />
+              </li>
+            ) : null}
+          </ul>
+        ) : null}
       </section>
 
       <section className="mt-4 grid gap-3 sm:grid-cols-3">
@@ -353,27 +409,6 @@ function morningReview(
     }
   }
 
-  const credit = unpaidCreditReport(
-    book.cashCloses,
-    (id) => book.employees.find((employee) => employee.id === id)?.name ?? "Staff",
-  );
-  const old = credit.lines.filter((line) => line.date && line.date <= addDays(today, -7) && line.balance > 0);
-  for (const line of old.slice(0, 4)) {
-    const who = line.customer || "A customer";
-    const staff = line.staff ? `, ${line.staff}` : "";
-    items.push({
-      tone: "bad",
-      text: `${who} still owes ${inr(line.balance)} from ${formatDay(line.date)}${staff}.`,
-      to: "/credit",
-    });
-  }
-  if (old.length > 4) {
-    items.push({
-      tone: "warn",
-      text: `${old.length - 4} more credits are over a week old.`,
-      to: "/credit",
-    });
-  }
   return items;
 }
 

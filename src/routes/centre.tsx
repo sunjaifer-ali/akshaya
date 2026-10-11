@@ -218,7 +218,7 @@ function MonthDetail({ row, onCommit }: { row: CentreSnapshot; onCommit: (amount
       </div>
       <label className="mt-4 block max-w-xs text-sm">
         <span className="mb-1 block text-muted">Last year, full month</span>
-        <MoneyField label="Last year collection" value={row.lastYear} onChange={onCommit} />
+        <MoneyField label="Last year collection" value={row.lastYear} disabled={row.lastYearSource === "book"} onChange={onCommit} />
       </label>
     </section>
   );

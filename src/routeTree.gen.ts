@@ -17,6 +17,7 @@ import { Route as CounterRouteImport } from './routes/counter'
 import { Route as CreditRouteImport } from './routes/credit'
 import { Route as DiaryRouteImport } from './routes/diary'
 import { Route as ExpensesRouteImport } from './routes/expenses'
+import { Route as GpayRouteImport } from './routes/gpay'
 import { Route as LeaveRouteImport } from './routes/leave'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as NoteRouteImport } from './routes/note'
@@ -64,6 +65,11 @@ const DiaryRoute = DiaryRouteImport.update({
 const ExpensesRoute = ExpensesRouteImport.update({
   id: '/expenses',
   path: '/expenses',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const GpayRoute = GpayRouteImport.update({
+  id: '/gpay',
+  path: '/gpay',
   getParentRoute: () => rootRouteImport,
 } as any)
 const LeaveRoute = LeaveRouteImport.update({
@@ -116,6 +122,7 @@ export interface FileRoutesByFullPath {
   '/credit': typeof CreditRoute
   '/diary': typeof DiaryRoute
   '/expenses': typeof ExpensesRoute
+  '/gpay': typeof GpayRoute
   '/leave': typeof LeaveRoute
   '/login': typeof LoginRoute
   '/note': typeof NoteRoute
@@ -134,6 +141,7 @@ export interface FileRoutesByTo {
   '/credit': typeof CreditRoute
   '/diary': typeof DiaryRoute
   '/expenses': typeof ExpensesRoute
+  '/gpay': typeof GpayRoute
   '/leave': typeof LeaveRoute
   '/login': typeof LoginRoute
   '/note': typeof NoteRoute
@@ -153,6 +161,7 @@ export interface FileRoutesById {
   '/credit': typeof CreditRoute
   '/diary': typeof DiaryRoute
   '/expenses': typeof ExpensesRoute
+  '/gpay': typeof GpayRoute
   '/leave': typeof LeaveRoute
   '/login': typeof LoginRoute
   '/note': typeof NoteRoute
@@ -173,6 +182,7 @@ export interface FileRouteTypes {
     | '/credit'
     | '/diary'
     | '/expenses'
+    | '/gpay'
     | '/leave'
     | '/login'
     | '/note'
@@ -191,6 +201,7 @@ export interface FileRouteTypes {
     | '/credit'
     | '/diary'
     | '/expenses'
+    | '/gpay'
     | '/leave'
     | '/login'
     | '/note'
@@ -209,6 +220,7 @@ export interface FileRouteTypes {
     | '/credit'
     | '/diary'
     | '/expenses'
+    | '/gpay'
     | '/leave'
     | '/login'
     | '/note'
@@ -228,6 +240,7 @@ export interface RootRouteChildren {
   CreditRoute: typeof CreditRoute
   DiaryRoute: typeof DiaryRoute
   ExpensesRoute: typeof ExpensesRoute
+  GpayRoute: typeof GpayRoute
   LeaveRoute: typeof LeaveRoute
   LoginRoute: typeof LoginRoute
   NoteRoute: typeof NoteRoute
@@ -294,6 +307,13 @@ declare module '@tanstack/react-router' {
       path: '/expenses'
       fullPath: '/expenses'
       preLoaderRoute: typeof ExpensesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/gpay': {
+      id: '/gpay'
+      path: '/gpay'
+      fullPath: '/gpay'
+      preLoaderRoute: typeof GpayRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/leave': {
@@ -364,6 +384,7 @@ const rootRouteChildren: RootRouteChildren = {
   CreditRoute: CreditRoute,
   DiaryRoute: DiaryRoute,
   ExpensesRoute: ExpensesRoute,
+  GpayRoute: GpayRoute,
   LeaveRoute: LeaveRoute,
   LoginRoute: LoginRoute,
   NoteRoute: NoteRoute,

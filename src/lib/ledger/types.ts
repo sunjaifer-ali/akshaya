@@ -17,6 +17,7 @@ export type CollectionDay = {
   personalGpay?: number;
   departmentGpay?: number;
   bankDepartment?: number;
+  creditService?: number;
 };
 
 export type ExpenseCategory = {
@@ -59,6 +60,7 @@ export type CashClose = {
   accepted: boolean;
   advanceHeld?: number;
   advanceServed?: number;
+  advanceIn?: number;
   profitTaken?: number;
   profitNote?: string;
   creditSeparate?: boolean;

@@ -322,6 +322,7 @@ export const useLedger = create<LedgerState>()(
             accepted: Boolean(close.accepted),
             advanceHeld: rupee(close.advanceHeld ?? 0),
             advanceServed: rupee(close.advanceServed ?? 0),
+            ...(typeof close.advanceIn === "number" ? { advanceIn: rupee(close.advanceIn) } : {}),
             profitTaken: rupee(close.profitTaken ?? 0),
             profitNote: (close.profitNote ?? "").trim().slice(0, 80),
             creditSeparate: Boolean(close.creditSeparate),
