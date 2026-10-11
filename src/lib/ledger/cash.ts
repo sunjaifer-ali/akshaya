@@ -200,7 +200,7 @@ export function checkClose(
   let previous = closeBase(last);
   let movement = closeBase(row) - previous;
   if (!countStarted(row) && !row.accepted) {
-    return { last: closeBase(last), lastDate: last.date, movement, collected: missing.length > 0 ? null : known, personalGpay, departmentGpay, bankDepartment, paidOut, ...gap, missing, difference: null, unfixed: null };
+    return { last: closeBase(last), lastDate: last.date, movement: null, collected: missing.length > 0 ? null : known, personalGpay, departmentGpay, bankDepartment, paidOut, ...gap, missing, difference: null, unfixed: null };
   }
   if (missing.length > 0) {
     return { last: closeBase(last), lastDate: last.date, movement, collected: null, personalGpay, departmentGpay, bankDepartment, paidOut, ...gap, missing, difference: null, unfixed: null };

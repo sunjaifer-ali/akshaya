@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
 import { ResultDialog, type Result } from "@/components/result-dialog";
-import { listBackups, restoreBackup } from "@/lib/centre.functions";
+import { exportCentreArchive, importCentreArchive, listBackups, restoreBackup } from "@/lib/centre.functions";
 import { useLedger } from "@/lib/ledger/store";
 import type { LedgerData } from "@/lib/ledger/types";
 
@@ -31,7 +31,17 @@ export function BackupDialog({ open, onOpenChange }: { open: boolean; onOpenChan
       description="A copy is kept each day the book changes. Download a file for the Google Drive folder."
     >
       <div className="grid gap-2">
-        <Button variant="secondary" onClick={() => downloadJson(`${slug(book.centreName)}-book.json`, book)}>
+        <Button
+          variant="secondary"
+          onClick={() => {
+            void exportCentreArchive()
+              .then((file) => {
+                downloadJson(`${slug(book.centreName)}-book.json`, file);
+                setNotice("Book downloaded, including the counter, credit, advances, and payments.");
+              })
+              .catch((error: unknown) => setNotice(error instanceof Error ? error.message : "The book was not downloaded."));
+          }}
+        >
           Download book
         </Button>
         <Button variant="secondary" onClick={() => fileRef.current?.click()}>
@@ -47,16 +57,12 @@ export function BackupDialog({ open, onOpenChange }: { open: boolean; onOpenChan
             event.target.value = "";
             if (!file) return;
             try {
-              const parsed = JSON.parse(await file.text()) as { book?: unknown };
-              const data = parsed.book ?? parsed;
-              if (!isBook(data)) {
-                setNotice("That file is not a centre book.");
-                return;
-              }
-              book.replaceBook(asBook(data));
-              setNotice("Book restored.");
-            } catch {
-              setNotice("Could not read that file.");
+              const parsed = JSON.parse(await file.text()) as unknown;
+              const saved = await importCentreArchive({ data: parsed });
+              book.replaceBook(asBook(saved.book));
+              setNotice("Book restored. Counter, credit, advances, and payments are included.");
+            } catch (error) {
+              setNotice(error instanceof Error ? error.message : "Could not read that file.");
             }
           }}
         />
@@ -114,45 +120,12 @@ function slug(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "centre";
 }
 
-function downloadJson(filename: string, state: ReturnType<typeof useLedger.getState>): void {
-  const book: LedgerData = {
-    centreName: state.centreName,
-    deductLwp: state.deductLwp,
-    sample: false,
-    sampleBanner: false,
-    employees: state.employees,
-    days: state.days,
-    categories: state.categories,
-    expenses: state.expenses,
-    leaves: state.leaves,
-    holidays: state.holidays,
-    perfOverrides: state.perfOverrides,
-    lyOverrides: state.lyOverrides,
-    cashCloses: state.cashCloses,
-  };
-  const blob = new Blob([JSON.stringify({ kind: "akshaya-thrikkadeeri-book", version: 1, book }, null, 2)], {
-    type: "application/json",
-  });
+function downloadJson(filename: string, file: unknown): void {
+  const blob = new Blob([JSON.stringify(file, null, 2)], { type: "application/json" });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
   link.download = filename;
   link.click();
   URL.revokeObjectURL(url);
-}
-
-function isBook(value: unknown): value is LedgerData {
-  if (!value || typeof value !== "object") return false;
-  const book = value as Partial<LedgerData>;
-  return (
-    typeof book.centreName === "string" &&
-    Array.isArray(book.employees) &&
-    Array.isArray(book.days) &&
-    Array.isArray(book.categories) &&
-    Array.isArray(book.leaves) &&
-    Array.isArray(book.holidays) &&
-    Array.isArray(book.perfOverrides) &&
-    !!book.expenses &&
-    typeof book.expenses === "object"
-  );
 }

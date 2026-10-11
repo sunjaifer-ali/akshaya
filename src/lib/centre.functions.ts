@@ -1,7 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { authMiddleware } from "@/lib/auth/middleware";
 import type { CashClose, CentrePayout, CollectionDay, LedgerData } from "@/lib/ledger/types";
-import { PAYOUT_KINDS } from "@/lib/ledger/types";
+import { PAYOUT_KINDS, withCategories } from "@/lib/ledger/types";
 import { isSunday } from "@/lib/ledger/dates";
 import { centreEmail, cleanUsername } from "@/lib/username";
 import { withTransaction } from "@/lib/db";
@@ -1705,11 +1705,7 @@ async function resyncCounterSplits(
     from service_entry group by taken_on
   `;
   const bankByDate = new Map(bankRows.map((entry) => [String(entry.taken_on).slice(0, 10), Number(entry.amount) || 0]));
-  if (rows.length === 0) {
-    const days = (book.days ?? []).filter((day) => !day.note.startsWith("Entered on the counter"));
-    if (days.length === (book.days ?? []).length) return { book, dates: [] };
-    return { book: { ...book, days }, dates: (book.days ?? []).filter((day) => day.note.startsWith("Entered on the counter")).map((day) => day.date) };
-  }
+  if (rows.length === 0) return { book, dates: [] };
   const departmentByDate = new Map(gpayRows.map((entry) => [String(entry.taken_on).slice(0, 10), Number(entry.department) || 0]));
   const byDate = new Map<string, { amount: number; splits: Record<string, number>; personalGpay: number; departmentGpay: number; bankDepartment: number }>();
   for (const entry of rows) {
@@ -1880,6 +1876,56 @@ export const saveSharedDay = createServerFn({ method: "POST" })
     return { book, touches } satisfies SharedBook;
   });
 
+export const exportCentreArchive = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
+  .handler(async ({ context }) => {
+    await requireAdmin(context.userId);
+    const { getSql } = await import("@/lib/db");
+    const sql = await getSql();
+    const rows = await sql<{ data: LedgerData | string }>`select data from centre_book where id = 'centre'`;
+    const stored = rows[0] ? asJson(rows[0].data) : null;
+    if (!stored?.centreName) throw new Error("The centre book is not there.");
+    const payouts = (await readPayouts(sql, context.userId)).map(({ mine: _mine, ...item }) => item);
+    const records = await readArchiveRecords(sql);
+    return {
+      kind: "akshaya-thrikkadeeri-book" as const,
+      version: 2 as const,
+      book: { ...stored, payouts },
+      ...records,
+    };
+  });
+
+export const importCentreArchive = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((input: unknown) => input)
+  .handler(async ({ context, data }) => {
+    await requireAdmin(context.userId);
+    const file = (data ?? {}) as { book?: unknown; services?: unknown; credits?: unknown; advances?: unknown; diary?: unknown };
+    const book = archiveBook(file.book ?? data);
+    if (!book) throw new Error("That file is not a centre book.");
+    const saved = await withTransaction(async (sql) => {
+      await ensureServiceTable(sql);
+      await ensureCustomerTable(sql);
+      await ensureAdvanceTable(sql);
+      await ensurePayoutTable(sql);
+      await ensureDiaryTable(sql);
+      if (Array.isArray(file.services)) await replaceServices(sql, file.services, context.userId);
+      if (Array.isArray(file.credits)) await replaceCredits(sql, file.credits, context.userId);
+      if (Array.isArray(file.advances)) await replaceAdvances(sql, file.advances, context.userId);
+      if (Array.isArray(file.diary)) await replaceDiary(sql, file.diary, context.userId);
+      if (Array.isArray(book.payouts)) await replacePayouts(sql, book.payouts, context.userId);
+      const synced = await resyncCounterSplits(sql, book);
+      const now = new Date().toISOString();
+      const touches: Record<string, string> = {};
+      for (const close of synced.book.cashCloses ?? []) touches[close.date] = now;
+      for (const day of synced.book.days ?? []) touches[`day:${day.date}`] = now;
+      const payouts = synced.book.payouts ?? [];
+      await writeBook(sql, withoutPayouts(synced.book), touches);
+      return { ...synced.book, payouts };
+    });
+    return { book: saved, touches: {} } satisfies SharedBook;
+  });
+
 export const listBackups = createServerFn({ method: "GET" })
   .middleware([authMiddleware])
   .handler(async ({ context }) => {
@@ -1902,12 +1948,32 @@ export const restoreBackup = createServerFn({ method: "POST" })
     await ensureBackupTable(sql);
     const rows = await sql<{ data: LedgerData | string }>`select data from centre_backup where id = ${id}`;
     const stored = rows[0] ? asJson(rows[0].data) : null;
-    if (!stored) throw new Error("That copy is not there.");
-    const now = new Date().toISOString();
-    const touches: Record<string, string> = {};
-    for (const close of stored.cashCloses ?? []) touches[close.date] = now;
-    await writeBook(sql, stored, touches);
-    return { book: stored, touches } satisfies SharedBook;
+    const wrapped = archiveFile(stored);
+    const book = archiveBook(wrapped?.book ?? stored);
+    if (!book) throw new Error("That copy is not there.");
+    const saved = await withTransaction(async (sql) => {
+      await ensureServiceTable(sql);
+      await ensureCustomerTable(sql);
+      await ensureAdvanceTable(sql);
+      await ensurePayoutTable(sql);
+      await ensureDiaryTable(sql);
+      if (wrapped) {
+        if (Array.isArray(wrapped.services)) await replaceServices(sql, wrapped.services, context.userId);
+        if (Array.isArray(wrapped.credits)) await replaceCredits(sql, wrapped.credits, context.userId);
+        if (Array.isArray(wrapped.advances)) await replaceAdvances(sql, wrapped.advances, context.userId);
+        if (Array.isArray(wrapped.diary)) await replaceDiary(sql, wrapped.diary, context.userId);
+        if (Array.isArray(book.payouts)) await replacePayouts(sql, book.payouts, context.userId);
+      }
+      const synced = await resyncCounterSplits(sql, book);
+      const now = new Date().toISOString();
+      const touches: Record<string, string> = {};
+      for (const close of synced.book.cashCloses ?? []) touches[close.date] = now;
+      for (const day of synced.book.days ?? []) touches[`day:${day.date}`] = now;
+      const payouts = synced.book.payouts ?? [];
+      await writeBook(sql, withoutPayouts(synced.book), touches);
+      return { ...synced.book, payouts };
+    });
+    return { book: saved, touches: {} } satisfies SharedBook;
   });
 
 async function keepDailyBackup(
@@ -1916,13 +1982,230 @@ async function keepDailyBackup(
 ) {
   await ensureBackupTable(sql);
   const day = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(new Date());
+  const records = await readArchiveRecords(sql);
+  const payload = { kind: "akshaya-thrikkadeeri-book", version: 2, book, ...records };
   await sql.query(
     `insert into centre_backup (id, taken_on, data)
      values ($1, $1::date, $2::jsonb)
      on conflict (id) do update set data = excluded.data, created_at = now()`,
-    [day, JSON.stringify(book)],
+    [day, JSON.stringify(payload)],
   );
   await sql.query(`delete from centre_backup where taken_on < ($1::date - interval '90 days')`, [day]);
+}
+
+type SqlClient = Awaited<ReturnType<typeof import("@/lib/db").getSql>>;
+
+function clip(value: unknown, max: number): string {
+  return String(value ?? "").trim().slice(0, max);
+}
+
+function isoDay(value: unknown): string {
+  const text = String(value ?? "").slice(0, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(text) ? text : "";
+}
+
+function rupees(value: unknown): number {
+  const amount = Math.round(Number(value));
+  if (!Number.isFinite(amount) || amount < 0 || amount > 10000000) return 0;
+  return amount;
+}
+
+function archiveBook(value: unknown): LedgerData | null {
+  if (!value || typeof value !== "object") return null;
+  const book = value as Partial<LedgerData>;
+  if (typeof book.centreName !== "string" || !Array.isArray(book.employees) || !Array.isArray(book.days)) return null;
+  return {
+    centreName: book.centreName,
+    deductLwp: book.deductLwp !== false,
+    sample: false,
+    sampleBanner: false,
+    employees: book.employees,
+    days: book.days,
+    categories: withCategories(book.categories),
+    expenses: book.expenses && typeof book.expenses === "object" ? book.expenses : {},
+    leaves: Array.isArray(book.leaves) ? book.leaves : [],
+    holidays: Array.isArray(book.holidays) ? book.holidays : [],
+    perfOverrides: Array.isArray(book.perfOverrides) ? book.perfOverrides : [],
+    lyOverrides: book.lyOverrides ?? {},
+    cashCloses: Array.isArray(book.cashCloses) ? book.cashCloses : [],
+    payouts: Array.isArray(book.payouts) ? book.payouts : [],
+  };
+}
+
+function archiveFile(value: unknown): { book: unknown; services?: unknown; credits?: unknown; advances?: unknown; diary?: unknown } | null {
+  if (!value || typeof value !== "object" || !("book" in value)) return null;
+  const file = value as { book?: unknown; services?: unknown; credits?: unknown; advances?: unknown; diary?: unknown };
+  if (!file.book || typeof file.book !== "object") return null;
+  return file as { book: unknown; services?: unknown; credits?: unknown; advances?: unknown; diary?: unknown };
+}
+
+async function readArchiveRecords(sql: SqlClient) {
+  await ensureServiceTable(sql);
+  await ensureCustomerTable(sql);
+  await ensureAdvanceTable(sql);
+  await ensureDiaryTable(sql);
+  const services = await sql<{
+    id: string;
+    taken_on: string;
+    user_id: string;
+    staff_name: string;
+    service: string;
+    customer: string;
+    mobile: string;
+    amount: number;
+    personal_gpay: boolean;
+    department: number;
+    bank_department: number;
+  }>`select id, taken_on::text as taken_on, user_id, staff_name, service, customer, mobile, amount, personal_gpay, department, bank_department from service_entry order by created_at`;
+  const credits = await sql<{
+    id: string;
+    taken_on: string;
+    user_id: string;
+    staff_name: string;
+    customer: string;
+    mobile: string;
+    kind: string;
+    amount: number;
+  }>`select id, taken_on::text as taken_on, user_id, staff_name, customer, mobile, kind, amount from customer_move order by created_at`;
+  const advances = await sql<{
+    id: string;
+    taken_on: string;
+    user_id: string;
+    staff_name: string;
+    customer: string;
+    mobile: string;
+    service: string;
+    amount: number;
+    used_on: string | null;
+    used_entry_id: string | null;
+  }>`select id, taken_on::text as taken_on, user_id, staff_name, customer, mobile, service, amount, used_on::text as used_on, used_entry_id from customer_advance order by created_at`;
+  const diary = await sql<{
+    id: string;
+    for_date: string;
+    note: string;
+    customer: string;
+    mobile: string;
+    user_id: string;
+    staff_name: string;
+    done_at: string | null;
+  }>`select id, for_date::text as for_date, note, customer, mobile, user_id, staff_name, done_at::text as done_at from centre_diary order by created_at`;
+  return {
+    services: services.map((row) => ({
+      id: row.id,
+      date: String(row.taken_on).slice(0, 10),
+      userId: row.user_id,
+      staff: row.staff_name,
+      service: row.service,
+      customer: row.customer,
+      mobile: row.mobile,
+      amount: Number(row.amount) || 0,
+      personalGpay: Boolean(row.personal_gpay),
+      department: Number(row.department) || 0,
+      bankDepartment: Number(row.bank_department) || 0,
+    })),
+    credits: credits.map((row) => ({
+      id: row.id,
+      date: String(row.taken_on).slice(0, 10),
+      userId: row.user_id,
+      staff: row.staff_name,
+      customer: row.customer,
+      mobile: row.mobile,
+      kind: row.kind === "debit" ? "debit" : "credit",
+      amount: Number(row.amount) || 0,
+    })),
+    advances: advances.map((row) => ({
+      id: row.id,
+      date: String(row.taken_on).slice(0, 10),
+      userId: row.user_id,
+      staff: row.staff_name,
+      customer: row.customer,
+      mobile: row.mobile,
+      service: row.service,
+      amount: Number(row.amount) || 0,
+      usedOn: row.used_on ? String(row.used_on).slice(0, 10) : "",
+      usedEntryId: row.used_entry_id || "",
+    })),
+    diary: diary.map((row) => ({
+      id: row.id,
+      date: String(row.for_date).slice(0, 10),
+      note: row.note,
+      customer: row.customer,
+      mobile: row.mobile,
+      userId: row.user_id,
+      staff: row.staff_name,
+      done: Boolean(row.done_at),
+    })),
+  };
+}
+
+async function replaceServices(sql: SqlClient, rows: unknown[], fallbackUser: string) {
+  await sql`delete from service_entry`;
+  for (const item of rows.slice(0, 20000)) {
+    const row = item as Record<string, unknown>;
+    const id = clip(row.id, 80);
+    const date = isoDay(row.date);
+    const amount = rupees(row.amount);
+    if (!id || !date || amount <= 0) continue;
+    await sql`insert into service_entry (id, taken_on, user_id, staff_name, service, customer, mobile, amount, personal_gpay, department, bank_department)
+      values (${id}, ${date}, ${clip(row.userId, 80) || fallbackUser}, ${clip(row.staff, 80) || "Staff"}, ${clip(row.service, 60)}, ${clip(row.customer, 80)}, ${clip(row.mobile, 15)}, ${amount}, ${Boolean(row.personalGpay)}, ${rupees(row.department)}, ${rupees(row.bankDepartment)})
+      on conflict (id) do nothing`;
+  }
+}
+
+async function replaceCredits(sql: SqlClient, rows: unknown[], fallbackUser: string) {
+  await sql`delete from customer_move`;
+  for (const item of rows.slice(0, 20000)) {
+    const row = item as Record<string, unknown>;
+    const id = clip(row.id, 80);
+    const date = isoDay(row.date);
+    const amount = rupees(row.amount);
+    if (!id || !date || amount <= 0) continue;
+    const kind = row.kind === "debit" ? "debit" : "credit";
+    await sql`insert into customer_move (id, taken_on, user_id, staff_name, customer, mobile, kind, amount)
+      values (${id}, ${date}, ${clip(row.userId, 80) || fallbackUser}, ${clip(row.staff, 80) || "Staff"}, ${clip(row.customer, 80)}, ${clip(row.mobile, 15)}, ${kind}, ${amount})
+      on conflict (id) do nothing`;
+  }
+}
+
+async function replaceAdvances(sql: SqlClient, rows: unknown[], fallbackUser: string) {
+  await sql`delete from customer_advance`;
+  for (const item of rows.slice(0, 20000)) {
+    const row = item as Record<string, unknown>;
+    const id = clip(row.id, 80);
+    const date = isoDay(row.date);
+    const amount = rupees(row.amount);
+    if (!id || !date || amount <= 0) continue;
+    const usedOn = isoDay(row.usedOn);
+    await sql`insert into customer_advance (id, taken_on, user_id, staff_name, customer, mobile, service, amount, used_on, used_entry_id)
+      values (${id}, ${date}, ${clip(row.userId, 80) || fallbackUser}, ${clip(row.staff, 80) || "Staff"}, ${clip(row.customer, 80)}, ${clip(row.mobile, 15)}, ${clip(row.service, 80)}, ${amount}, ${usedOn || null}, ${clip(row.usedEntryId, 80) || null})
+      on conflict (id) do nothing`;
+  }
+}
+
+async function replacePayouts(sql: SqlClient, rows: CentrePayout[], fallbackUser: string) {
+  await sql`delete from centre_payout`;
+  for (const row of rows.slice(0, 20000)) {
+    const date = isoDay(row.date);
+    const amount = rupees(row.amount);
+    if (!row.id || !date || amount <= 0) continue;
+    await sql`insert into centre_payout (id, taken_on, user_id, staff_name, category, amount, note)
+      values (${clip(row.id, 80)}, ${date}, ${fallbackUser}, ${clip(row.by, 80) || "Admin"}, ${clip(row.category, 40)}, ${amount}, ${clip(row.note, 80)})
+      on conflict (id) do nothing`;
+  }
+}
+
+async function replaceDiary(sql: SqlClient, rows: unknown[], fallbackUser: string) {
+  await sql`delete from centre_diary`;
+  for (const item of rows.slice(0, 20000)) {
+    const row = item as Record<string, unknown>;
+    const id = clip(row.id, 80);
+    const date = isoDay(row.date);
+    const note = clip(row.note, 500);
+    if (!id || !date || !note) continue;
+    await sql`insert into centre_diary (id, for_date, note, customer, mobile, user_id, staff_name, done_at)
+      values (${id}, ${date}, ${note}, ${clip(row.customer, 80)}, ${clip(row.mobile, 15)}, ${clip(row.userId, 80) || fallbackUser}, ${clip(row.staff, 80) || "Staff"}, ${row.done ? new Date().toISOString() : null})
+      on conflict (id) do nothing`;
+  }
 }
 
 async function ensureBackupTable(sql: Awaited<ReturnType<typeof import("@/lib/db").getSql>>) {
