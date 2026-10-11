@@ -1,0 +1,97 @@
+<html><head><meta http-equiv="content-type" content="application/vnd.ms-excel; charset=UTF-8"><style>td {border: 0.5pt solid #c0c0c0} .tRight { text-align:right} .tLeft { text-align:left} </style></head><body><table class="table sum_table" id="akshaya-table">
+ <thead class="THead">
+    <tr>
+      <th class="SlNo">Sl.No</th>
+    <th class="Name">Name</th>
+    <th class="Services">Services</th>  
+    <th class="DeptPay">Dept. Pay</th>
+    <th class="ServiceCharge">Service Charge</th>
+    <th class="Total">Total</th>
+    </tr>
+    </thead>
+
+
+
+     
+    <tbody class="TBody">   
+      <tr>
+        <td class="rowDataSd SlNo">1</td>
+        <td class="rowDataSd Name">admin </td>
+        <td class="count-me4">0</td>
+        <td class="count-me1"></td>
+        <td class="count-me2"></td>
+        <td class="count-me3"></td>  
+        
+    </tr>
+     
+    <tr>
+        <td class="rowDataSd SlNo">2</td>
+        <td class="rowDataSd Name">AJITHA </td>
+        <td class="count-me4">26</td>
+        <td class="count-me1">0</td>
+        <td class="count-me2">2630</td>
+        <td class="count-me3">2630</td>  
+    </tr>
+       
+    <tr>
+        <td class="rowDataSd SlNo">3</td>
+        <td class="rowDataSd Name">ANEESA </td>
+        <td class="count-me4">0</td>
+        <td class="count-me1"></td>
+        <td class="count-me2"></td>
+        <td class="count-me3"></td>  
+    </tr>
+       
+    <tr>
+        <td class="rowDataSd SlNo">4</td>
+        <td class="rowDataSd Name">SHEENA </td>
+        <td class="count-me4">18</td>
+        <td class="count-me1">0</td>
+        <td class="count-me2">1820</td>
+        <td class="count-me3">1820</td>  
+    </tr>
+       
+    <tr>
+        <td class="rowDataSd SlNo">5</td>
+        <td class="rowDataSd Name">SAJINI </td>
+        <td class="count-me4">0</td>
+        <td class="count-me1"></td>
+        <td class="count-me2"></td>
+        <td class="count-me3"></td>  
+    </tr>
+       
+    <tr>
+        <td class="rowDataSd SlNo">6</td>
+        <td class="rowDataSd Name">HASEENA </td>
+        <td class="count-me4">30</td>
+        <td class="count-me1">0</td>
+        <td class="count-me2">3007</td>
+        <td class="count-me3">3007</td>  
+    </tr>
+       
+    <tr>
+        <td class="rowDataSd SlNo">7</td>
+        <td class="rowDataSd Name">RUBEENA </td>
+        <td class="count-me4">16</td>
+        <td class="count-me1">0</td>
+        <td class="count-me2">1633</td>
+        <td class="count-me3">1633</td>  
+    </tr>
+       
+
+
+    <tr class="TBody TotalTBody">
+     <td colspan="1"></td>
+     <td class=""><b>TOTAL</b></td>
+     <td class="totalCol" id="tot_serv">90</td>
+     <td class="totalCol" id="tot_dept">0</td>
+     <td class="totalCol" id="tot_charg">9090</td>
+     <td class="totalCol" id="tot_tot">9090</td>
+    </tr>
+ 
+   </tbody> 
+  
+
+
+
+</table></body></html>
