@@ -45,7 +45,6 @@ function CollectionsPage() {
       <PageHeader
         kicker="COLLECTIONS"
         title="Collections"
-        lede="The counter is the collection. Each charge is added to that person and to the centre total."
         actions={
           <MonthBar
             month={month}
@@ -58,13 +57,7 @@ function CollectionsPage() {
 
       <section className="mt-4 rounded-xl border border-line bg-surface p-5">
         <h2 className="font-display text-2xl">{formatMonth(month)}</h2>
-        <p className="mt-1 text-sm text-muted">
-          {sheetOnly
-            ? "This month is still one total entered by hand."
-            : savedDays.length > 0
-              ? "Month net is the sum of the counter days."
-              : "No charges saved for this month yet."}
-        </p>
+        {savedDays.length === 0 ? <p className="mt-2 text-sm text-muted">No charges saved for this month yet.</p> : null}
         {sheetOnly ? (
           <div className="mt-3 max-w-xs">
             <MoneyField
@@ -80,7 +73,7 @@ function CollectionsPage() {
               <li key={day.date} className="flex flex-wrap items-center justify-between gap-3 py-2 text-sm">
                 <span>{formatDay(day.date)}</span>
                 <span className="flex flex-wrap items-center gap-3">
-                  <span className="tabular-nums">{inr(day.amount)}</span>
+                  <span className="text-lg font-medium tabular-nums">{inr(day.amount)}</span>
                   {day.note.startsWith("Entered on the counter") ? (
                     <span className="text-xs text-faint">Counter</span>
                   ) : pendingDelete === day.date ? (
@@ -121,7 +114,6 @@ function CollectionsPage() {
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
             <h2 className="font-display text-2xl">By person</h2>
-            <p className="text-sm text-muted">Sum of each person’s daily totals. Salary uses this figure.</p>
             {gap !== 0 ? (
               <p className="mt-1 text-sm text-warn">
                 {inr(Math.abs(gap))} is in the centre total but not on a person. The sign-in name and the salary name must be the same.

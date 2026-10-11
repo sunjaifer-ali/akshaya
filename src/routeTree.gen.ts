@@ -15,10 +15,12 @@ import { Route as ClosingRouteImport } from './routes/closing'
 import { Route as CollectionsRouteImport } from './routes/collections'
 import { Route as CounterRouteImport } from './routes/counter'
 import { Route as CreditRouteImport } from './routes/credit'
+import { Route as DiaryRouteImport } from './routes/diary'
 import { Route as ExpensesRouteImport } from './routes/expenses'
 import { Route as LeaveRouteImport } from './routes/leave'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as NoteRouteImport } from './routes/note'
+import { Route as PaymentsRouteImport } from './routes/payments'
 import { Route as ReportsRouteImport } from './routes/reports'
 import { Route as SalaryRouteImport } from './routes/salary'
 import { Route as StaffRouteImport } from './routes/staff'
@@ -54,6 +56,11 @@ const CreditRoute = CreditRouteImport.update({
   path: '/credit',
   getParentRoute: () => rootRouteImport,
 } as any)
+const DiaryRoute = DiaryRouteImport.update({
+  id: '/diary',
+  path: '/diary',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ExpensesRoute = ExpensesRouteImport.update({
   id: '/expenses',
   path: '/expenses',
@@ -72,6 +79,11 @@ const LoginRoute = LoginRouteImport.update({
 const NoteRoute = NoteRouteImport.update({
   id: '/note',
   path: '/note',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PaymentsRoute = PaymentsRouteImport.update({
+  id: '/payments',
+  path: '/payments',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ReportsRoute = ReportsRouteImport.update({
@@ -102,10 +114,12 @@ export interface FileRoutesByFullPath {
   '/collections': typeof CollectionsRoute
   '/counter': typeof CounterRoute
   '/credit': typeof CreditRoute
+  '/diary': typeof DiaryRoute
   '/expenses': typeof ExpensesRoute
   '/leave': typeof LeaveRoute
   '/login': typeof LoginRoute
   '/note': typeof NoteRoute
+  '/payments': typeof PaymentsRoute
   '/reports': typeof ReportsRoute
   '/salary': typeof SalaryRoute
   '/staff': typeof StaffRoute
@@ -118,10 +132,12 @@ export interface FileRoutesByTo {
   '/collections': typeof CollectionsRoute
   '/counter': typeof CounterRoute
   '/credit': typeof CreditRoute
+  '/diary': typeof DiaryRoute
   '/expenses': typeof ExpensesRoute
   '/leave': typeof LeaveRoute
   '/login': typeof LoginRoute
   '/note': typeof NoteRoute
+  '/payments': typeof PaymentsRoute
   '/reports': typeof ReportsRoute
   '/salary': typeof SalaryRoute
   '/staff': typeof StaffRoute
@@ -135,10 +151,12 @@ export interface FileRoutesById {
   '/collections': typeof CollectionsRoute
   '/counter': typeof CounterRoute
   '/credit': typeof CreditRoute
+  '/diary': typeof DiaryRoute
   '/expenses': typeof ExpensesRoute
   '/leave': typeof LeaveRoute
   '/login': typeof LoginRoute
   '/note': typeof NoteRoute
+  '/payments': typeof PaymentsRoute
   '/reports': typeof ReportsRoute
   '/salary': typeof SalaryRoute
   '/staff': typeof StaffRoute
@@ -153,10 +171,12 @@ export interface FileRouteTypes {
     | '/collections'
     | '/counter'
     | '/credit'
+    | '/diary'
     | '/expenses'
     | '/leave'
     | '/login'
     | '/note'
+    | '/payments'
     | '/reports'
     | '/salary'
     | '/staff'
@@ -169,10 +189,12 @@ export interface FileRouteTypes {
     | '/collections'
     | '/counter'
     | '/credit'
+    | '/diary'
     | '/expenses'
     | '/leave'
     | '/login'
     | '/note'
+    | '/payments'
     | '/reports'
     | '/salary'
     | '/staff'
@@ -185,10 +207,12 @@ export interface FileRouteTypes {
     | '/collections'
     | '/counter'
     | '/credit'
+    | '/diary'
     | '/expenses'
     | '/leave'
     | '/login'
     | '/note'
+    | '/payments'
     | '/reports'
     | '/salary'
     | '/staff'
@@ -202,10 +226,12 @@ export interface RootRouteChildren {
   CollectionsRoute: typeof CollectionsRoute
   CounterRoute: typeof CounterRoute
   CreditRoute: typeof CreditRoute
+  DiaryRoute: typeof DiaryRoute
   ExpensesRoute: typeof ExpensesRoute
   LeaveRoute: typeof LeaveRoute
   LoginRoute: typeof LoginRoute
   NoteRoute: typeof NoteRoute
+  PaymentsRoute: typeof PaymentsRoute
   ReportsRoute: typeof ReportsRoute
   SalaryRoute: typeof SalaryRoute
   StaffRoute: typeof StaffRoute
@@ -256,6 +282,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof CreditRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/diary': {
+      id: '/diary'
+      path: '/diary'
+      fullPath: '/diary'
+      preLoaderRoute: typeof DiaryRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/expenses': {
       id: '/expenses'
       path: '/expenses'
@@ -282,6 +315,13 @@ declare module '@tanstack/react-router' {
       path: '/note'
       fullPath: '/note'
       preLoaderRoute: typeof NoteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/payments': {
+      id: '/payments'
+      path: '/payments'
+      fullPath: '/payments'
+      preLoaderRoute: typeof PaymentsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/reports': {
@@ -322,10 +362,12 @@ const rootRouteChildren: RootRouteChildren = {
   CollectionsRoute: CollectionsRoute,
   CounterRoute: CounterRoute,
   CreditRoute: CreditRoute,
+  DiaryRoute: DiaryRoute,
   ExpensesRoute: ExpensesRoute,
   LeaveRoute: LeaveRoute,
   LoginRoute: LoginRoute,
   NoteRoute: NoteRoute,
+  PaymentsRoute: PaymentsRoute,
   ReportsRoute: ReportsRoute,
   SalaryRoute: SalaryRoute,
   StaffRoute: StaffRoute,

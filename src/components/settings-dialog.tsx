@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
-import { createEmployeeAccount, listAccounts, removeEmployeeAccount, resetEmployeePassword, revealStaffPassword, type CentreRole } from "@/lib/centre.functions";
+import { createEmployeeAccount, changeAdminUsername, listAccounts, removeEmployeeAccount, resetEmployeePassword, revealStaffPassword, type CentreRole } from "@/lib/centre.functions";
 import { authClient, storeSessionToken } from "@/lib/auth/client";
 import { ResultDialog, type Result } from "@/components/result-dialog";
 import { useLedger } from "@/lib/ledger/store";
@@ -27,6 +27,11 @@ export function SettingsDialog({
   const [staffName, setStaffName] = useState("");
   const [staffUsername, setStaffUsername] = useState("");
   const [staffPassword, setStaffPassword] = useState("");
+  const [closerName, setCloserName] = useState("");
+  const [closerUsername, setCloserUsername] = useState("");
+  const [closerPassword, setCloserPassword] = useState("");
+  const [adminUsername, setAdminUsername] = useState("");
+  const [savingName, setSavingName] = useState(false);
   const [resetFor, setResetFor] = useState("");
   const [currentPassword, setCurrentPassword] = useState("");
   const [nextPassword, setNextPassword] = useState("");
@@ -35,17 +40,25 @@ export function SettingsDialog({
 
   useEffect(() => {
     if (!open) return;
+    setAdminUsername("");
     void listAccounts()
-      .then((rows) => setAccounts(Array.isArray(rows) ? rows : []))
+      .then((rows) => rememberAccounts(rows))
       .catch((error: unknown) => {
         setAccounts([]);
         setNotice(error instanceof Error ? error.message : "Could not load accounts.");
       });
   }, [open]);
 
+  const rememberAccounts = (rows: { userId: string; role: CentreRole; name: string; username: string }[]) => {
+    const list = Array.isArray(rows) ? rows : [];
+    setAccounts(list);
+    const admin = list.find((row) => row.role === "admin");
+    if (admin) setAdminUsername((current) => current || admin.username);
+  };
+
   const refreshAccounts = () => {
     void listAccounts()
-      .then((rows) => setAccounts(Array.isArray(rows) ? rows : []))
+      .then((rows) => rememberAccounts(rows))
       .catch((error: unknown) => setNotice(error instanceof Error ? error.message : "Could not load accounts."));
   };
 
@@ -54,11 +67,11 @@ export function SettingsDialog({
       open={open}
       onOpenChange={onOpenChange}
       title="Centre settings"
-      description="Staff sign in with their own name. Press and hold Show to see the password."
+      description="Staff and closing sign in with their own name. The admin username is changed here."
     >
       <div className="rounded-lg border border-line p-3">
         <p className="text-sm font-medium">User accounts</p>
-        <p className="mt-1 text-xs text-muted">Press and hold Show to see a staff password. A password chosen before this update appears after they change it, or after you set it back to Akshaya@1.</p>
+        <p className="mt-1 text-xs text-muted">Press and hold Show to see a staff or closing password. A password chosen before this update appears after they change it, or after you set it back to Akshaya@1.</p>
         {accounts.length === 0 ? <p className="mt-3 text-sm text-muted">No accounts loaded yet.</p> : null}
         <ul className="mt-3 divide-y divide-line">
           {accounts.map((account) => (
@@ -66,10 +79,10 @@ export function SettingsDialog({
               <span>
                 <span className="font-medium">{account.name}</span>
                 <span className="mt-0.5 block text-xs text-faint">
-                  {account.username} · {account.role === "admin" ? "Admin" : "Counter"}
+                  {account.username} · {account.role === "admin" ? "Admin" : account.role === "closer" ? "Closing" : "Counter"}
                 </span>
               </span>
-              {account.role === "employee" ? (
+              {account.role !== "admin" ? (
                 resetFor === account.userId ? (
                   <span className="flex gap-2">
                     <Button
@@ -164,6 +177,93 @@ export function SettingsDialog({
           onChange={(event) => setStaffPassword(event.target.value)}
         />
         <Button type="submit">Add account</Button>
+      </form>
+
+      <form
+        className="mt-4 grid gap-2 rounded-lg border border-line p-3"
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (!closerName.trim() || !closerUsername.trim()) {
+            setNotice("Enter the name and username.");
+            return;
+          }
+          if (closerPassword.length < 8) {
+            setNotice("The password needs at least 8 characters.");
+            return;
+          }
+          void createEmployeeAccount({ data: { name: closerName.trim(), username: closerUsername.trim().toLowerCase(), password: closerPassword, role: "closer" } })
+            .then(() => {
+              setCloserName("");
+              setCloserUsername("");
+              setCloserPassword("");
+              refreshAccounts();
+              setNotice("Closing account added.");
+            })
+            .catch((error: unknown) => setNotice(error instanceof Error ? error.message : "Could not add that account."));
+        }}
+      >
+        <p className="text-sm font-medium">Add a closing login</p>
+        <p className="text-xs text-muted">Counter and Closing only. They can count the day. They cannot accept it, or open salary, reports, or settings.</p>
+        <input
+          aria-label="Closing name"
+          placeholder="Name"
+          className="h-11 rounded-sm border border-line bg-bg px-3 text-base outline-none focus:border-accent"
+          value={closerName}
+          onChange={(event) => setCloserName(event.target.value)}
+        />
+        <input
+          aria-label="Closing username"
+          placeholder="Username"
+          autoComplete="off"
+          className="h-11 rounded-sm border border-line bg-bg px-3 text-base outline-none focus:border-accent"
+          value={closerUsername}
+          onChange={(event) => setCloserUsername(event.target.value.toLowerCase())}
+        />
+        <input
+          aria-label="Closing account password"
+          type="text"
+          autoComplete="new-password"
+          placeholder="Password, 8 or more characters"
+          className="h-11 rounded-sm border border-line bg-bg px-3 text-base outline-none focus:border-accent"
+          value={closerPassword}
+          onChange={(event) => setCloserPassword(event.target.value)}
+        />
+        <Button type="submit">Add closing account</Button>
+      </form>
+
+      <form
+        className="mt-4 grid gap-2 rounded-lg border border-line p-3"
+        onSubmit={(event) => {
+          event.preventDefault();
+          const username = adminUsername.trim().toLowerCase();
+          if (!username) {
+            setNotice("Enter the username.");
+            return;
+          }
+          setSavingName(true);
+          void changeAdminUsername({ data: username })
+            .then((saved) => {
+              setAdminUsername(saved.username);
+              refreshAccounts();
+              setNotice(`Username changed. Sign in next time as ${saved.username}.`);
+            })
+            .catch((error: unknown) => setNotice(error instanceof Error ? error.message : "Could not change the username."))
+            .finally(() => setSavingName(false));
+        }}
+      >
+        <p className="text-sm font-medium">Admin username</p>
+        <p className="text-xs text-muted">Used at sign in, with the admin password. Staff and closing passwords stay as they are.</p>
+        <input
+          aria-label="Admin username"
+          autoComplete="username"
+          placeholder="Username"
+          className="h-11 rounded-sm border border-line bg-bg px-3 text-base outline-none focus:border-accent"
+          value={adminUsername}
+          onChange={(event) => setAdminUsername(event.target.value.toLowerCase())}
+        />
+        <Button type="submit" disabled={savingName}>
+          {savingName ? "Saving…" : "Save username"}
+        </Button>
       </form>
 
       <form

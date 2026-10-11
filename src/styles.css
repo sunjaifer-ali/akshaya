@@ -112,13 +112,8 @@
 }
 
 @page {
-  size: A4 landscape;
   margin: 8mm;
-}
-
-@page landscape-sheet {
-  size: A4 landscape;
-  margin: 8mm;
+  size: auto;
 }
 
 @page salary {
@@ -127,16 +122,21 @@
 }
 
 @media print {
-
   html,
-  body {
+  body,
+  .min-h-dvh,
+  .h-dvh {
     background: white !important;
     overflow: visible !important;
     height: auto !important;
+    min-height: 0 !important;
   }
 
   .no-print,
-  .print-chart {
+  .print-chart,
+  aside,
+  header,
+  nav {
     display: none !important;
   }
 
@@ -146,12 +146,22 @@
 
   .print-shell {
     padding: 0 !important;
+    margin: 0 !important;
   }
 
   main {
     max-width: none !important;
     padding: 0 !important;
     overflow: visible !important;
+  }
+
+  main > img {
+    display: block !important;
+    height: 28px !important;
+    width: auto !important;
+    margin: 0 auto 8px !important;
+    break-after: avoid;
+    page-break-after: avoid;
   }
 
   .overflow-x-auto {
@@ -168,11 +178,15 @@
   th,
   td {
     padding: 2px 3px !important;
-    white-space: normal;
+    white-space: normal !important;
   }
 
   .tabular-nums {
     white-space: nowrap !important;
+  }
+
+  thead {
+    display: table-header-group;
   }
 
   tr {
@@ -203,10 +217,6 @@
   .salary-slip:last-child,
   .month-note:last-child {
     break-after: auto;
-  }
-
-  .report-sheet {
-    page: landscape-sheet;
   }
 
   main:has(.salary-slip) > img,

@@ -8,8 +8,7 @@ import { ResultDialog, type Result } from "@/components/result-dialog";
 import { Button } from "@/components/ui/button";
 import { chartColors } from "@/lib/chart-colors";
 import { inr, pct } from "@/lib/format";
-import { centreSnapshot, leaveTally, monthCollection, recordedAttendance, staffMonthRows } from "@/lib/ledger/calc";
-import { creditGivenInMonth } from "@/lib/ledger/cash";
+import { centreSnapshot, monthCollection, recordedAttendance, staffMonthRows } from "@/lib/ledger/calc";
 import { formatMonthShort, fyLabel, fyMonths, fyStartYear, isSunday } from "@/lib/ledger/dates";
 import { useLedger } from "@/lib/ledger/store";
 import { LEAVE_LABEL, type Employee } from "@/lib/ledger/types";
@@ -74,19 +73,6 @@ function StaffPage() {
   const yearVisible = yearRows.filter((row) => row.month <= cutoff || row.collection > 0);
   const ytdCollection = yearVisible.reduce((sum, row) => sum + row.collection, 0);
   const ytdPay = yearVisible.reduce((sum, row) => sum + row.gross, 0);
-  const tally = selected
-    ? fyMonths(fy).reduce(
-        (sum, item) => {
-          const marks = leaveTally(book.leaves, selected.employee.id, item);
-          return {
-            CL: sum.CL + marks.CL,
-            SL: sum.SL + marks.SL,
-            LWP: sum.LWP + marks.LWP,
-          };
-        },
-        { CL: 0, SL: 0, LWP: 0 },
-      )
-    : null;
   const centreYear = yearVisible.reduce((sum, row) => {
     const snap = centreSnapshot(
       book.employees,
@@ -105,17 +91,13 @@ function StaffPage() {
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<Employee | null>(null);
   const [result, setResult] = useState<Result | null>(null);
-  const [confirmDelete, setConfirmDelete] = useState(false);
-  const monthCredit = selected
-    ? (creditGivenInMonth(book.cashCloses, month).find((item) => item.employeeId === selected.employee.id)?.amount ?? 0)
-    : 0;
+  const left = book.employees.filter((employee) => !employee.active && !rows.some((row) => row.employee.id === employee.id));
 
   return (
     <div>
       <PageHeader
         kicker="STAFF"
         title="Performance"
-        lede="Collection, share of the centre, days present, and the credit each person has given."
         actions={
           <div className="flex flex-wrap items-center gap-2">
             <Button
@@ -162,14 +144,16 @@ function StaffPage() {
                       row.employee.id === selectedId && "bg-accent-soft",
                     )}
                     onClick={() => {
-                      setConfirmDelete(false);
                       void navigate({ search: { m: month, e: row.employee.id } });
                     }}
                   >
                     <td className="px-3 py-3 tabular-nums">{index + 1}</td>
                     <td className="px-3 py-3">
                       <span className="font-medium">{row.employee.name}</span>
-                      <span className="mt-0.5 block text-xs text-faint">{row.employee.role}</span>
+                      <span className="mt-0.5 block text-xs text-faint">
+                        {row.employee.role}
+                        {row.employee.active ? "" : " · Inactive"}
+                      </span>
                     </td>
                     <td className="px-3 py-3 tabular-nums">{attendanceLabel(book.days, book.leaves, row.employee.id, month, book.holidays)}</td>
                     <td className="px-3 py-3 tabular-nums">{inr(row.collection)}</td>
@@ -190,45 +174,45 @@ function StaffPage() {
                   <p className="text-xs font-semibold tracking-widest text-accent">{fyLabel(fy)}</p>
                   <h2 className="font-display text-2xl">{selected.employee.name}</h2>
                 </div>
-                {confirmDelete ? (
-                  <div className="flex flex-wrap gap-2">
-                    <Button
-                      size="sm"
-                      variant="danger"
-                      onClick={() => {
-                        const name = selected.employee.name;
-                        book.removeEmployee(selected.employee.id);
-                        setConfirmDelete(false);
-                        setResult({ ok: true, message: `${name} successfully removed.` });
-                      }}
-                    >
-                      Delete {selected.employee.name}
-                    </Button>
-                    <Button size="sm" variant="secondary" onClick={() => setConfirmDelete(false)}>
-                      Keep
-                    </Button>
-                  </div>
-                ) : (
-                  <div className="flex flex-wrap gap-2">
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => {
+                      setEditing(selected.employee);
+                      setOpen(true);
+                    }}
+                  >
+                    Edit
+                  </Button>
+                  {selected.employee.active ? (
                     <Button
                       size="sm"
                       variant="secondary"
                       onClick={() => {
-                        setEditing(selected.employee);
-                        setOpen(true);
+                        book.setEmployeeActive(selected.employee.id, false);
+                        setResult({
+                          ok: true,
+                          message: `${selected.employee.name} is deactivated. Past collection and pay stay in the book.`,
+                        });
                       }}
                     >
-                      Edit
+                      Deactivate
                     </Button>
-                    <Button size="sm" variant="ghost" onClick={() => setConfirmDelete(true)}>
-                      Delete
+                  ) : (
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onClick={() => {
+                        book.setEmployeeActive(selected.employee.id, true);
+                        setResult({ ok: true, message: `${selected.employee.name} is active again.` });
+                      }}
+                    >
+                      Activate
                     </Button>
-                  </div>
-                )}
+                  )}
+                </div>
               </div>
-              <p className="text-sm text-muted">
-                This month {selected.employee.name.split(" ")[0]} collected {inr(selected.collection)}. Salary of {inr(selected.pay.basicPayable)} is {pct(selected.pay.salaryPct)} of that. Incentive of {inr(selected.pay.incentive)} is separate.
-              </p>
               <div className="mt-4 grid gap-3 sm:grid-cols-4">
                 <Mini label="Year collection" value={inr(ytdCollection)} />
                 <Mini label="Year salary" value={inr(ytdPay)} />
@@ -250,18 +234,28 @@ function StaffPage() {
                   </ResponsiveContainer>
                 ) : null}
               </div>
-              {tally ? (
-                <p className="mt-2 text-sm text-muted">
-                  This month {attendanceLabel(book.days, book.leaves, selected.employee.id, month, book.holidays)} present. Leave this year: {tally.CL} casual, {tally.SL} sick, {tally.LWP} unpaid. Credit given {inr(monthCredit)}.{" "}
-                  <Link to="/leave" search={{ m: month }} className="font-medium text-accent">
-                    Open the leave register
-                  </Link>
-                </p>
-              ) : null}
             </section>
           ) : null}
         </>
       )}
+      {left.length > 0 ? (
+        <section className="mt-4 rounded-xl border border-line bg-surface p-5">
+          <h2 className="font-medium">Inactive</h2>
+          <ul className="mt-3 divide-y divide-line">
+            {left.map((employee) => (
+              <li key={employee.id} className="flex items-center justify-between gap-3 py-2 text-sm">
+                <span>
+                  {employee.name}
+                  <span className="mt-0.5 block text-xs text-faint">{employee.role}</span>
+                </span>
+                <Button size="sm" variant="secondary" onClick={() => book.setEmployeeActive(employee.id, true)}>
+                  Activate
+                </Button>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
       <StaffDialog open={open} employee={editing} onOpenChange={setOpen} onResult={setResult} />
       <ResultDialog result={result} onClose={() => setResult(null)} />
     </div>
@@ -272,7 +266,7 @@ function Mini({ label, value }: { label: string; value: string }) {
   return (
     <div>
       <p className="text-xs font-semibold tracking-widest text-faint">{label.toUpperCase()}</p>
-      <p className="font-display text-2xl tabular-nums">{value}</p>
+      <p className="font-display text-3xl tabular-nums">{value}</p>
     </div>
   );
 }

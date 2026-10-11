@@ -7,12 +7,14 @@ import {
 } from "@/lib/centre.functions";
 import { useLedger } from "@/lib/ledger/store";
 import type { CashClose, CollectionDay, LedgerData } from "@/lib/ledger/types";
+import { withCategories } from "@/lib/ledger/types";
 
 let touches: Record<string, string> = {};
 let applying = false;
 let role: CentreRole | null = null;
 let timer: ReturnType<typeof setTimeout> | null = null;
 let missing = false;
+const REDACTED = "centre-redacted";
 
 export function sharedBookMissing(): boolean {
   return missing;
@@ -34,6 +36,7 @@ function snapshot(): LedgerData {
     perfOverrides: state.perfOverrides,
     lyOverrides: state.lyOverrides,
     cashCloses: state.cashCloses,
+    payouts: state.payouts ?? [],
   };
 }
 
@@ -44,6 +47,8 @@ function asBook(book: LedgerData): LedgerData {
     sampleBanner: false,
     lyOverrides: book.lyOverrides ?? {},
     cashCloses: book.cashCloses ?? [],
+    payouts: book.payouts ?? [],
+    categories: withCategories(book.categories),
   };
 }
 
@@ -65,10 +70,13 @@ export async function startSharing(next: CentreRole): Promise<void> {
     return;
   }
   touches = { ...(remote.touches ?? {}) };
-  if (next === "employee" || state.sample) {
+  const redacted = sessionStorage.getItem(REDACTED) === "1";
+  if (next !== "admin" || state.sample || redacted) {
     applying = true;
     useLedger.getState().replaceBook(asBook(remote.book));
     applying = false;
+    if (next === "admin") sessionStorage.removeItem(REDACTED);
+    else sessionStorage.setItem(REDACTED, "1");
     return;
   }
   const days = new Map((remote.book.days ?? []).map((day) => [day.date, day]));
@@ -122,9 +130,14 @@ export function watchAdminBook(): () => void {
 }
 
 export async function pullSharedCloses(): Promise<void> {
-  if (role !== "admin") return;
+  if (role !== "admin" && role !== "closer") return;
   const remote = await loadSharedBook();
   if (!remote) return;
+  const remotePayouts = remote.book.payouts ?? [];
+  const localPayouts = useLedger.getState().payouts ?? [];
+  const payoutsChanged =
+    remotePayouts.length !== localPayouts.length ||
+    remotePayouts.some((item, index) => item.id !== localPayouts[index]?.id || item.amount !== localPayouts[index]?.amount);
   const map = new Map(useLedger.getState().cashCloses.map((close) => [close.date, close]));
   const days = new Map(useLedger.getState().days.map((day) => [day.date, day]));
   const touchedDays = new Set<string>();
@@ -149,7 +162,7 @@ export async function pullSharedCloses(): Promise<void> {
     touchedDays.add(date);
     changed = true;
   }
-  if (!changed) return;
+  if (!changed && !payoutsChanged) return;
   const state = useLedger.getState();
   const leaves = state.leaves.filter((mark) => !touchedDays.has(mark.date));
   for (const mark of remote.book.leaves ?? []) {
@@ -160,6 +173,7 @@ export async function pullSharedCloses(): Promise<void> {
     cashCloses: [...map.values()].sort((a, b) => (a.date < b.date ? -1 : 1)),
     days: [...days.values()].sort((a, b) => (a.date < b.date ? -1 : 1)),
     leaves,
+    payouts: remotePayouts,
   });
   applying = false;
 }

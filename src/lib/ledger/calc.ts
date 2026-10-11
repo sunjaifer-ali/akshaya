@@ -1,5 +1,6 @@
 import { datesInMonth, isSunday, lastYearMonth } from "@/lib/ledger/dates";
 import type {
+  CentrePayout,
   CollectionDay,
   Employee,
   LeaveCode,
@@ -157,6 +158,14 @@ export function expenseTotal(
   return Object.values(row).reduce((sum, amount) => sum + amount, 0);
 }
 
+export function payoutTotal(payouts: CentrePayout[] | undefined, month: string, categoryId?: string): number {
+  return (payouts ?? []).reduce((sum, item) => {
+    if (!item.date.startsWith(month)) return sum;
+    if (categoryId && item.category !== categoryId) return sum;
+    return sum + (item.amount || 0);
+  }, 0);
+}
+
 export function lastYearFigure(
   days: CollectionDay[],
   lyOverrides: Record<string, number>,
@@ -244,7 +253,14 @@ export function staffMonthRows(
           mark.date.startsWith(month) &&
           (!inProgress || mark.date <= asOf),
       ).length;
-      const pay = payFor(employee, perf.amount, lwp, full, elapsed, deductLwp);
+      const half = leaves.filter(
+        (mark) =>
+          mark.employeeId === employee.id &&
+          mark.code === "HD" &&
+          mark.date.startsWith(month) &&
+          (!inProgress || mark.date <= asOf),
+      ).length;
+      const pay = payFor(employee, perf.amount, lwp + half * 0.5, full, elapsed, deductLwp);
       return {
         employee,
         collection: perf.amount,
@@ -278,18 +294,23 @@ export const DESK_LABEL: Record<Desk, string> = {
   new: "New joinee",
 };
 
+export type NoteTone = "good" | "warn" | "ink";
+export type NoteKind = "share" | "pace" | "centre" | "days";
+export type NoteHonour = "lead" | "even" | "room" | "own" | "soon";
+
 export type MonthNote = {
   desk: Desk;
-  lines: { label: string; value: string }[];
+  honour: NoteHonour;
+  lines: { label: string; value: string; tone: NoteTone; kind: NoteKind; fill?: number }[];
   sentence: string;
 };
 
-/** Percentages only. No rupees, no salary, and no comparison across desks. */
+/** Shares and growth stay percentages. Working days are a count, like 7/7. No rupees. */
 export function monthNote(
   employee: Employee,
   rows: StaffMonthRow[],
   previous: StaffMonthRow[],
-  presentPct: number | null,
+  attendance: { present: number; working: number } | null,
   centreGrowthPct: number | null = null,
   pace?: { elapsed: number; monthDays: number; lastDays: number; inProgress: boolean },
 ): MonthNote {
@@ -299,36 +320,59 @@ export function monthNote(
   const group = peers.reduce((sum, row) => sum + row.collection, 0);
   const share = peers.length > 1 && group > 0 && mine ? (mine.collection / group) * 100 : null;
   const earlier = previous.find((row) => row.employee.id === employee.id);
-  const lines: { label: string; value: string }[] = [];
-  if (share != null) lines.push({ label: `Your share of the ${DESK_LABEL[desk].toLowerCase()}`, value: `${Math.round(share)}%` });
+  const lines: MonthNote["lines"] = [];
+  if (share != null) {
+    lines.push({
+      label: `Your share of the ${DESK_LABEL[desk].toLowerCase()}`,
+      value: `${Math.round(share)}%`,
+      tone: share >= 55 ? "good" : "ink",
+      kind: "share",
+      fill: Math.max(0, Math.min(100, share)),
+    });
+  }
   const growth = paceLine(mine?.collection ?? 0, earlier?.collection ?? 0, pace);
   if (growth) lines.push(growth);
   const centre = centreGrowthLine(centreGrowthPct);
   if (centre) lines.push(centre);
-  if (presentPct != null) lines.push({ label: "Working days you were in", value: `${Math.round(presentPct)}%` });
+  if (attendance && attendance.working > 0) {
+    const present = Number.isInteger(attendance.present) ? String(attendance.present) : attendance.present.toFixed(1);
+    const full = attendance.present >= attendance.working;
+    lines.push({
+      label: "Working days you were in",
+      value: `${present}/${attendance.working}`,
+      tone: full ? "good" : "ink",
+      kind: "days",
+      fill: Math.max(0, Math.min(100, (attendance.present / attendance.working) * 100)),
+    });
+  }
 
+  let honour: NoteHonour = "soon";
   let sentence: string;
   if (desk === "new" && peers.length < 2) {
+    honour = "own";
     sentence = growth
       ? "You are compared only with your own last month, not with the Aadhaar desk or the service desk."
       : "This month is your base. From next month the note compares you with yourself, not with the senior desks.";
   } else if (share == null) {
     sentence = "Once this desk has counter charges, this note shows your share of that desk only.";
   } else if (share >= 55) {
+    honour = "lead";
     sentence = `You are leading the ${DESK_LABEL[desk].toLowerCase()} this month.`;
   } else if (share >= 45) {
+    honour = "even";
     sentence = `The ${DESK_LABEL[desk].toLowerCase()} is level this month.`;
   } else {
+    honour = "room";
     sentence = `There is room to come up on the ${DESK_LABEL[desk].toLowerCase()}.`;
   }
-  return { desk, lines, sentence };
+  return { desk, honour, lines, sentence };
 }
 
 function paceLine(
   current: number,
   previous: number,
   pace?: { elapsed: number; monthDays: number; lastDays: number; inProgress: boolean },
-): { label: string; value: string } | null {
+): MonthNote["lines"][number] | null {
   if (previous <= 0) return null;
   const running = Boolean(pace?.inProgress && pace.elapsed > 0 && pace.monthDays > 0 && pace.elapsed < pace.monthDays && pace.lastDays > 0);
   const change = running
@@ -336,18 +380,19 @@ function paceLine(
     : ((current - previous) / previous) * 100;
   const label = running ? "Your pace against last month" : "Against your own last month";
   const rounded = Math.round(change);
-  if (rounded > 100) return { label, value: "More than double" };
-  if (rounded > 0) return { label, value: `Up ${rounded}%` };
-  if (rounded < 0) return { label, value: `Down ${Math.abs(rounded)}%` };
-  return { label, value: "Level" };
+  if (rounded > 100) return { label, value: "More than double", tone: "good", kind: "pace" };
+  if (rounded > 0) return { label, value: `Up ${rounded}%`, tone: "good", kind: "pace" };
+  if (rounded < 0) return { label, value: `Down ${Math.abs(rounded)}%`, tone: "warn", kind: "pace" };
+  return { label, value: "Level", tone: "ink", kind: "pace" };
 }
 
-function centreGrowthLine(pct: number | null): { label: string; value: string } | null {
+function centreGrowthLine(pct: number | null): MonthNote["lines"][number] | null {
   if (pct == null) return null;
   const rounded = Math.round(pct);
-  if (rounded > 0) return { label: "Centre growth this month", value: `Up ${rounded}%` };
-  if (rounded < 0) return { label: "Centre growth this month", value: `Down ${Math.abs(rounded)}%` };
-  return { label: "Centre growth this month", value: "Level" };
+  const label = "Centre growth this month";
+  if (rounded > 0) return { label, value: `Up ${rounded}%`, tone: "good", kind: "centre" };
+  if (rounded < 0) return { label, value: `Down ${Math.abs(rounded)}%`, tone: "warn", kind: "centre" };
+  return { label, value: "Level", tone: "ink", kind: "centre" };
 }
 
 export type CentreSnapshot = {
@@ -382,6 +427,7 @@ export function centreSnapshot(
   month: string,
   deductLwp: boolean,
   asOf = "",
+  payouts: CentrePayout[] = [],
 ): CentreSnapshot {
   const collection = monthCollection(days, month);
   const rows = staffMonthRows(
@@ -395,7 +441,7 @@ export function centreSnapshot(
     deductLwp,
     asOf,
   );
-  const expense = expenseTotal(expenses, month);
+  const expense = expenseTotal(expenses, month) + payoutTotal(payouts, month);
   const basicPay = rows.reduce((sum, row) => sum + row.pay.basicPayable, 0);
   const incentivePay = rows.reduce((sum, row) => sum + row.pay.incentive, 0);
   const salary = basicPay + incentivePay;

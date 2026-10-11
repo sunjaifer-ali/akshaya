@@ -99,8 +99,8 @@ function LoginPage() {
         <h1 className="text-center font-display text-4xl leading-tight">Thrikkadeeri</h1>
         <p className="mt-2 text-center text-sm text-muted">
           {mode === "create"
-            ? "Create the admin account. Staff accounts are added later from Settings."
-            : "Choose your name. Staff enter the password. The admin also enters the username."}
+            ? "Create the admin account. Staff and closing accounts are added later from Settings."
+            : "Choose your name. Staff and closing enter the password. The admin also enters the username."}
         </p>
         {mode === "loading" ? <p className="mt-6 text-sm text-muted">Opening…</p> : null}
         {mode !== "loading" ? (
@@ -131,7 +131,7 @@ function LoginPage() {
                   <option value="">Select a name</option>
                   {choices.map((person) => (
                     <option key={person.username} value={person.username}>
-                      {person.role === "admin" ? `${person.name} (Admin)` : person.name}
+                      {person.role === "admin" ? `${person.name} (Admin)` : person.role === "closer" ? `${person.name} (Closing)` : person.name}
                     </option>
                   ))}
                 </select>

@@ -11,24 +11,27 @@ import {
   accountLines,
   cashInHand,
   checkClose,
-  closingTotal,
   countStarted,
   creditGivenInMonth,
+  creditGivenTotal,
   creditPaidTotal,
   emptyNotes,
+  moneyInHand,
   previousClose,
   unpaidCreditReport,
   type UnpaidCreditLine,
 } from "@/lib/ledger/cash";
 import { addDays, formatDay, formatFull } from "@/lib/ledger/dates";
 import { pushClose } from "@/lib/ledger/share";
-import { myRole, closingCredit } from "@/lib/centre.functions";
+import { myRole, closingAdvance, closingCredit, addCentrePayout, listCentrePayouts, removeCentrePayout, updateAdvance } from "@/lib/centre.functions";
 import { useCurrentUserState } from "@/lib/auth/use-current-user";
 import { useLedger } from "@/lib/ledger/store";
-import type { CashClose, CreditGiven, CreditPayment, Employee } from "@/lib/ledger/types";
+import type { CashClose, CentrePayout, CreditGiven, CreditPayment, Employee } from "@/lib/ledger/types";
+import { payoutKind, payoutLabel } from "@/lib/ledger/types";
 import { readDate } from "@/lib/search";
 import { useTodayKey } from "@/lib/use-today";
 import { useEffect, useState, type ReactNode } from "react";
+import { useRefresh } from "@/lib/use-refresh";
 
 export const Route = createFileRoute("/closing")({
   validateSearch: readDate,
@@ -42,10 +45,10 @@ function ClosingPage() {
   const date = search.d || today || "2026-10-05";
   const book = useLedger();
   const { user } = useCurrentUserState();
-  const [role, setRole] = useState<"admin" | "employee">("admin");
+  const [role, setRole] = useState<"admin" | "employee" | "closer">("admin");
   const saved = book.cashCloses.find((item) => item.date === date);
   const accepted = Boolean(saved?.accepted);
-  const locked = role === "employee" && accepted;
+  const locked = accepted && role !== "admin";
   const previous = previousClose(book.cashCloses, date);
   const [draft, setDraft] = useState<CashClose>(() => saved ?? blank(date, previous?.credits ?? 0));
   const [editing, setEditing] = useState(!saved);
@@ -53,12 +56,27 @@ function ClosingPage() {
   const [result, setResult] = useState<Result | null>(null);
   const [confirmClear, setConfirmClear] = useState(false);
   const [liveCredit, setLiveCredit] = useState<{ given: CreditGiven[]; paid: CreditPayment[]; unpaid: number } | null>(null);
+  const [liveAdvance, setLiveAdvance] = useState<{ held: number; lastDate: string; lastHeld: number; received: number; used: number; served: number; open: AdvanceLine[]; paid: AdvanceLine[] } | null>(null);
+  const [advanceEdit, setAdvanceEdit] = useState<{ id: string; customer: string; mobile: string; service: string; amount: string } | null>(null);
+  const [advancePending, setAdvancePending] = useState(false);
+  const [payouts, setPayouts] = useState<CentrePayout[]>([]);
+  const [payAmount, setPayAmount] = useState<number | null>(null);
+  const [payNote, setPayNote] = useState("");
 
   useEffect(() => {
     void myRole()
-      .then((result) => setRole(result.role === "employee" ? "employee" : "admin"))
+      .then((result) => setRole(result.role === "employee" || result.role === "closer" ? result.role : "admin"))
       .catch(() => setRole("admin"));
   }, []);
+
+  useEffect(() => {
+    if (!today || date !== today) return;
+    const current = book.cashCloses.find((item) => item.date === date);
+    if (!current || current.creditSeparate) return;
+    const next = { ...current, creditSeparate: true };
+    book.setCashClose(next);
+    void pushClose(date, next).catch(() => undefined);
+  }, [book, date, today]);
 
   useEffect(() => {
     const current = book.cashCloses.find((item) => item.date === date);
@@ -70,35 +88,53 @@ function ClosingPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [date]);
 
-  useEffect(() => {
-    let stop = false;
-    const pull = () => {
-      void closingCredit({ data: date })
-        .then((credit) => {
-          if (!stop) setLiveCredit({ given: credit.given, paid: credit.paid, unpaid: credit.unpaid });
-        })
-        .catch(() => undefined);
-    };
-    pull();
-    const timer = window.setInterval(pull, 8000);
-    return () => {
-      stop = true;
-      window.clearInterval(timer);
-    };
-  }, [date]);
+  useRefresh(() => {
+    return closingCredit({ data: date })
+      .then((credit) => setLiveCredit({ given: credit.given, paid: credit.paid, unpaid: credit.unpaid }))
+      .catch(() => undefined);
+  }, 15000, [date]);
+
+  useRefresh(() => {
+    if (role !== "admin" && role !== "closer") return;
+    return closingAdvance({ data: date })
+      .then((advance) => setLiveAdvance(advance))
+      .catch(() => undefined);
+  }, 15000, [date, role]);
+
+  useRefresh(() => {
+    return listCentrePayouts({ data: date })
+      .then((desk) => setPayouts(desk.rows))
+      .catch(() => undefined);
+  }, 15000, [date]);
 
   const base = editing ? draft : (saved ?? draft);
-  const row = liveCredit
-    ? { ...base, creditGiven: liveCredit.given, creditPaid: liveCredit.paid, credits: liveCredit.unpaid }
-    : base;
-  const closing = closingTotal(row);
+  const separate = Boolean(saved?.creditSeparate) || !saved || Boolean(today && date >= today);
+  const row = {
+    ...base,
+    creditSeparate: separate,
+    ...(liveCredit ? { creditGiven: liveCredit.given, creditPaid: liveCredit.paid, credits: liveCredit.unpaid } : {}),
+    advanceHeld: liveAdvance?.held ?? base.advanceHeld ?? 0,
+    advanceServed: liveAdvance?.served ?? base.advanceServed ?? 0,
+  };
+  const closing = moneyInHand(row);
   const cash = cashInHand(row.notes);
   const paid = creditPaidTotal(row);
+  const givenTotal = creditGivenTotal(row);
   const counted = countStarted(row);
   const tallyReady = counted;
-  const previewCloses = tallyReady ? [...book.cashCloses.filter((item) => item.date !== date), row] : book.cashCloses;
-  const check = checkClose(row, previewCloses, book.days, book.holidays);
-  const lines = accountLines(book.cashCloses, book.days, book.holidays);
+  const previewCloses = (tallyReady ? [...book.cashCloses.filter((item) => item.date !== date), row] : book.cashCloses).map((item) => {
+    if (!liveAdvance) return item;
+    if (item.date === date) return { ...item, advanceHeld: liveAdvance.held, advanceServed: liveAdvance.served };
+    if (liveAdvance.lastDate && item.date === liveAdvance.lastDate) return { ...item, advanceHeld: liveAdvance.lastHeld };
+    return item;
+  });
+  const check = checkClose(row, previewCloses, book.days, book.holidays, payouts);
+  const lined = book.cashCloses.map((item) => {
+    if (item.date === date) return { ...item, creditSeparate: separate, profitTaken: row.profitTaken, profitNote: row.profitNote, advanceHeld: row.advanceHeld, advanceServed: row.advanceServed };
+    if (liveAdvance?.lastDate && item.date === liveAdvance.lastDate) return { ...item, advanceHeld: liveAdvance.lastHeld };
+    return item;
+  });
+  const lines = accountLines(lined, book.days, book.holidays, payouts);
   const shorts = lines.filter((line) => line.unfixed < 0);
   const excesses = lines.filter((line) => line.unfixed > 0);
   const shortTotal = shorts.reduce((sum, line) => sum + -line.unfixed, 0);
@@ -125,7 +161,6 @@ function ClosingPage() {
       <PageHeader
         kicker="CLOSING"
         title="Daily closing"
-        lede="Notes, wallets, credit, and bank. Today’s movement should match the counter collection."
         actions={
           <div className="no-print flex items-center gap-2">
             <Button variant="secondary" size="icon" aria-label="Previous day" onClick={() => go(addDays(date, -1))}>
@@ -243,14 +278,6 @@ function ClosingPage() {
         <AccountTile label="Short" count={shorts.length} total={shortTotal} tone="bad" />
         <AccountTile label="Excess" count={excesses.length} total={excessTotal} tone="warn" />
       </section>
-      {tallyReady && check.difference != null && check.difference !== 0 ? (
-        <p className={cn("mb-4 text-sm font-medium", (check.unfixed ?? 0) < 0 ? "text-bad" : "text-warn")}>
-          This day · {(check.unfixed ?? 0) < 0 ? "Short" : "Excess"} {inr(Math.abs(check.unfixed ?? 0))}
-        </p>
-      ) : null}
-      {!tallyReady && (given.length > 0 || (liveCredit?.unpaid ?? 0) > 0) ? (
-        <p className="mb-4 text-sm text-muted">Credit is recorded. It is not a shortage. Short and excess start after the notes, wallets, or bank are entered.</p>
-      ) : null}
 
       <section className="rounded-xl border border-line bg-surface p-5">
         <h2 className="font-medium">Notes</h2>
@@ -291,13 +318,109 @@ function ClosingPage() {
         <Field label="CSC wallet">
           <MoneyField label="CSC wallet" value={row.csc} disabled={!editing} onChange={(amount) => patch({ csc: amount ?? 0 })} />
         </Field>
-        <Field label="Credits still unpaid">
-          <MoneyField label="Credits still unpaid" value={row.credits} disabled onChange={() => undefined} />
-        </Field>
         <Field label="Bank balance">
           <MoneyField label="Bank balance" value={row.bank} disabled={!editing} onChange={(amount) => patch({ bank: amount ?? 0 })} />
         </Field>
       </section>
+
+      <PaidOut
+        date={date}
+        rows={payouts.filter((item) => item.date === date)}
+        amount={payAmount}
+        note={payNote}
+        onAmount={setPayAmount}
+        onNote={setPayNote}
+        onSaved={(message) => setResult({ ok: true, message })}
+        onFailed={(message) => setResult({ ok: false, message })}
+        onReload={() => {
+          void listCentrePayouts({ data: date }).then((desk) => setPayouts(desk.rows)).catch(() => undefined);
+        }}
+        locked={locked}
+      />
+
+      {role === "admin" ? (
+        <section className="mt-4 rounded-xl border border-line bg-surface p-5">
+          <h2 className="font-medium">Transfer to self or other accounts</h2>
+          <div className="mt-3 grid gap-3 sm:grid-cols-2">
+            <Field label="Amount transferred">
+              <MoneyField label="Amount transferred" value={row.profitTaken ?? 0} disabled={!editing} onChange={(amount) => patch({ profitTaken: amount ?? 0 })} />
+            </Field>
+            <label className="block text-sm">
+              <span className="mb-1 block text-muted">Account</span>
+              <input
+                className="h-11 w-full rounded-sm border border-line bg-bg px-3 text-base outline-none focus:border-accent disabled:opacity-70"
+                value={row.profitNote ?? ""}
+                disabled={!editing}
+                placeholder="Own account"
+                onChange={(event) => patch({ profitNote: event.target.value.slice(0, 80) })}
+              />
+            </label>
+          </div>
+          <ProfitMonth date={date} row={row} closes={book.cashCloses} />
+        </section>
+      ) : null}
+
+      {(role === "admin" || role === "closer") && liveAdvance && (liveAdvance.open.length > 0 || liveAdvance.paid.length > 0) ? (
+        <section className="mt-4 rounded-xl border border-line bg-surface p-5">
+          <h2 className="font-medium">Advance still to serve</h2>
+          {liveAdvance.received > 0 || liveAdvance.used > 0 ? (
+            <p className="mt-1 text-sm text-muted">
+              {liveAdvance.received > 0 ? `Received today ${inr(liveAdvance.received)}` : ""}
+              {liveAdvance.received > 0 && liveAdvance.used > 0 ? " · " : ""}
+              {liveAdvance.used > 0 ? `Service given ${inr(liveAdvance.used)}` : ""}
+            </p>
+          ) : null}
+          <ul className="mt-2 divide-y divide-line">
+            {liveAdvance.open.map((line) => (
+              <li key={line.id} className="py-2 text-sm">
+                <div className="flex items-center justify-between gap-3">
+                  <span>
+                    {line.customer}
+                    <span className="mt-0.5 block text-xs text-faint">{line.service} · {line.staff}</span>
+                  </span>
+                  <span className="flex items-center gap-3">
+                    <span className="tabular-nums">{inr(line.amount)}</span>
+                    {role === "admin" ? (
+                      <Button size="sm" variant="secondary" className="no-print" disabled={advancePending} onClick={() => setAdvanceEdit({ id: line.id, customer: line.customer, mobile: line.mobile, service: line.service, amount: String(line.amount) })}>
+                        Edit
+                      </Button>
+                    ) : null}
+                  </span>
+                </div>
+                {role === "admin" && advanceEdit?.id === line.id ? (
+                  <AdvanceEditFields edit={advanceEdit} pending={advancePending} onChange={setAdvanceEdit} onCancel={() => setAdvanceEdit(null)} onSave={() => saveClosingAdvance(advanceEdit, date, setAdvancePending, setAdvanceEdit, setLiveAdvance, setResult)} />
+                ) : null}
+              </li>
+            ))}
+          </ul>
+          {role === "admin" && liveAdvance.paid.length > 0 ? (
+            <>
+              <h3 className="mt-4 font-medium">Service given</h3>
+              <ul className="mt-2 divide-y divide-line">
+                {liveAdvance.paid.map((line) => (
+                  <li key={line.id} className="py-2 text-sm">
+                    <div className="flex items-center justify-between gap-3">
+                      <span>
+                        {line.customer}
+                        <span className="mt-0.5 block text-xs text-faint">{line.service} · {line.staff}</span>
+                      </span>
+                      <span className="flex items-center gap-3">
+                        <span className="tabular-nums">{inr(line.amount)}</span>
+                        <Button size="sm" variant="secondary" className="no-print" disabled={advancePending} onClick={() => setAdvanceEdit({ id: line.id, customer: line.customer, mobile: line.mobile, service: line.service, amount: String(line.amount) })}>
+                          Edit
+                        </Button>
+                      </span>
+                    </div>
+                    {advanceEdit?.id === line.id ? (
+                      <AdvanceEditFields edit={advanceEdit} pending={advancePending} onChange={setAdvanceEdit} onCancel={() => setAdvanceEdit(null)} onSave={() => saveClosingAdvance(advanceEdit, date, setAdvancePending, setAdvanceEdit, setLiveAdvance, setResult)} />
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
+            </>
+          ) : null}
+        </section>
+      ) : null}
 
       <section className="mt-4 rounded-xl border border-line bg-surface p-4">
         <div className="flex flex-wrap items-baseline justify-between gap-3">
@@ -314,38 +437,39 @@ function ClosingPage() {
             </Button>
           </div>
         </div>
-        <p className="mt-2 text-sm text-muted">Staff enter credit and later payments on Credit. This balance is what is still unpaid.</p>
-        <CreditGiven
-          editing={false}
-          rows={given}
-          staff={book.employees}
-          stillUnpaid={row.credits}
-          monthGiven={monthGiven}
-          onChange={(creditGiven, credits) => patch({ creditGiven, credits })}
-        />
-        <CreditPaid
-          editing={false}
-          payments={payments}
-          paid={paid}
-          lastCredits={previous?.credits ?? 0}
-          stillUnpaid={row.credits}
-          onChange={(creditPaid, credits) => patch({ creditPaid, credits })}
-        />
+        {given.length > 0 ? (
+          <CreditGiven
+            editing={false}
+            rows={given}
+            staff={book.employees}
+            stillUnpaid={row.credits}
+            monthGiven={monthGiven}
+            onChange={(creditGiven, credits) => patch({ creditGiven, credits })}
+          />
+        ) : null}
+        {payments.length > 0 ? (
+          <CreditPaid
+            editing={false}
+            payments={payments}
+            paid={paid}
+            lastCredits={previous?.credits ?? 0}
+            stillUnpaid={row.credits}
+            onChange={(creditPaid, credits) => patch({ creditPaid, credits })}
+          />
+        ) : null}
       </section>
 
       <section className="mt-4 rounded-xl border border-line bg-surface p-5">
         <h2 className="font-medium">Total closing</h2>
         <p className="mt-1 font-display text-3xl tabular-nums">{inr(closing)}</p>
-        <p className="mt-1 text-sm text-muted">Notes {inr(cash)} + wallets, credits, and bank {inr(closing - cash)}.</p>
+        <ClosingParts cash={cash} wallets={row.eDistrict + row.csc} bank={row.bank} />
       </section>
 
-      <CheckCard date={date} check={check} fixed={row.fixed} paid={paid} locked={!editing} hold={!tallyReady} onFixed={(fixed) => patch({ fixed })} />
+      <CheckCard date={date} check={check} fixed={row.fixed} paid={paid} given={givenTotal} locked={!editing} hold={!tallyReady} onFixed={(fixed) => patch({ fixed })} />
 
       {shorts.length + excesses.length > 0 ? (
         <details className="short-report mt-4 rounded-xl border border-line bg-surface p-4">
-          <summary className="cursor-pointer text-sm font-medium">
-            Open days · Short {shorts.length} · Excess {excesses.length}
-          </summary>
+          <summary className="cursor-pointer text-sm font-medium">Open days</summary>
           <div className="mt-3 grid gap-4 sm:grid-cols-2">
             <AccountList title="Short" lines={shorts} onOpen={go} />
             <AccountList title="Excess" lines={excesses} onOpen={go} />
@@ -361,6 +485,7 @@ function CheckCard({
   check,
   fixed,
   paid,
+  given,
   locked,
   hold,
   onFixed,
@@ -369,6 +494,7 @@ function CheckCard({
   check: ReturnType<typeof checkClose>;
   fixed: number;
   paid: number;
+  given: number;
   locked: boolean;
   hold: boolean;
   onFixed: (amount: number) => void;
@@ -377,7 +503,6 @@ function CheckCard({
     return (
       <section className="mt-4 rounded-xl border border-line bg-surface p-5">
         <h2 className="font-medium">Opening</h2>
-        <p className="mt-1 text-sm text-muted">First closing. The next day is checked against this.</p>
       </section>
     );
   }
@@ -386,40 +511,47 @@ function CheckCard({
 
   return (
     <section className="mt-4 rounded-xl border border-line bg-surface p-5">
-      <h2 className="font-medium">Against last closing</h2>
-      <dl className="mt-3 grid gap-2 text-sm">
+      <p className="text-xs font-semibold tracking-widest text-faint">DIFFERENCE</p>
+      <p
+        className={cn(
+          "mt-1 font-display text-4xl tabular-nums",
+          shown.difference == null ? "text-ink" : shown.difference < 0 ? "text-bad" : shown.difference > 0 ? "text-warn" : "text-accent",
+        )}
+      >
+        {diffLabel(shown.difference)}
+      </p>
+      <h2 className="mt-5 font-medium">Against last closing</h2>
+      <dl className="mt-3 grid gap-2 text-base">
         <Pair label={`Last closing, ${formatDay(check.lastDate)}`} value={inr(check.last)} />
         <Pair label="Movement" value={signedInr(check.movement)} />
         <Pair label="Counter collection" value={check.collected == null ? "—" : inr(check.collected)} />
-        <Pair label="GPay received in personal number" value={inr(check.personalGpay)} />
-        {check.personalGpay > 0 ? (
-          <p className="text-xs text-muted">All staff together. This money is not in the centre cash, so it is left out of the match.</p>
-        ) : null}
-        {paid > 0 ? <Pair label="Credit paid today" value={inr(paid)} /> : null}
-        <Pair
-          label="Difference"
-          value={diffLabel(shown.difference)}
-          tone={shown.difference == null ? "ink" : shown.difference < 0 ? "bad" : shown.difference > 0 ? "warn" : "good"}
-        />
+        {check.personalGpay > 0 ? <Pair label="Service charge on personal GPay" value={inr(check.personalGpay)} /> : null}
+        {check.departmentGpay > 0 ? <Pair label="Department fee on that GPay" value={inr(check.departmentGpay)} /> : null}
+        {check.bankDepartment > 0 ? <Pair label="Department paid from our bank" value={inr(check.bankDepartment)} /> : null}
+        {check.advanceHeld > 0 || check.advanceChange !== 0 ? <Pair label="Advance still held" value={inr(check.advanceHeld)} /> : null}
+        {check.advanceServed > 0 ? <Pair label="Advance served" value={inr(check.advanceServed)} /> : null}
+        {check.advanceChange !== 0 ? <Pair label="Advance since last closing" value={signedInr(check.advanceChange)} /> : null}
+        {check.profitTaken > 0 ? <Pair label="Transferred from the bank" value={inr(check.profitTaken)} /> : null}
+        {check.paidOut > 0 ? <Pair label="Paid out" value={inr(check.paidOut)} /> : null}
+        {given > 0 ? <Pair label="Credit given, added" value={inr(given)} /> : null}
+        {paid > 0 ? <Pair label="Credit received, taken out" value={inr(paid)} /> : null}
       </dl>
-      {hold ? (
-        <p className="mt-3 text-sm text-muted">Enter the notes and wallets. Short or excess is counted from that.</p>
-      ) : shown.missing.length > 0 ? (
+      {hold ? null : shown.missing.length > 0 ? (
         <p className="mt-3 text-sm text-muted">
-          Counter missing: {check.missing.map((item) => formatDay(item)).join(", ")}. Enter the charges for those days.
+          Counter missing: {check.missing.map((item) => formatDay(item)).join(", ")}.
         </p>
-      ) : shown.difference === 0 ? (
-        <p className="mt-3 text-sm text-accent">Matches the counter.</p>
-      ) : (
+      ) : shown.difference === 0 ? null : (
         <div className="mt-3">
           <label className="block max-w-xs text-sm">
             <span className="mb-1 block text-muted">Fixed</span>
             <MoneyField label="Amount fixed" value={fixed} disabled={locked} onChange={(amount) => onFixed(amount ?? 0)} />
           </label>
-          <p className="mt-2 text-sm">
-            Still open {(check.unfixed ?? 0) < 0 ? "short" : "excess"}{" "}
-            <span className={cn("font-medium tabular-nums", (check.unfixed ?? 0) < 0 ? "text-bad" : "text-warn")}>{inr(Math.abs(check.unfixed ?? 0))}</span>
-          </p>
+          {fixed !== 0 ? (
+            <p className="mt-2 text-sm">
+              Still open {(check.unfixed ?? 0) < 0 ? "short" : "excess"}{" "}
+              <span className={cn("font-medium tabular-nums", (check.unfixed ?? 0) < 0 ? "text-bad" : "text-warn")}>{inr(Math.abs(check.unfixed ?? 0))}</span>
+            </p>
+          ) : null}
         </div>
       )}
     </section>
@@ -594,12 +726,129 @@ function CreditPaid({
           ))}
         </ul>
       ) : null}
-      <p className="mt-2 text-sm text-muted">
-        Paid {inr(paid)} · Unpaid {inr(stillUnpaid)}
-      </p>
       {paid > lastCredits ? <p className="mt-1 text-sm text-warn">More than was unpaid. Count that extra cash in the notes, and it shows as excess.</p> : null}
     </div>
   );
+}
+
+function PaidOut({
+  date,
+  rows,
+  amount,
+  note,
+  onAmount,
+  onNote,
+  onSaved,
+  onFailed,
+  onReload,
+  locked,
+}: {
+  date: string;
+  rows: CentrePayout[];
+  amount: number | null;
+  note: string;
+  onAmount: (value: number | null) => void;
+  onNote: (value: string) => void;
+  onSaved: (message: string) => void;
+  onFailed: (message: string) => void;
+  onReload: () => void;
+  locked: boolean;
+}) {
+  const [pending, setPending] = useState(false);
+  const total = rows.reduce((sum, row) => sum + row.amount, 0);
+  return (
+    <section className="mt-4 rounded-xl border border-line bg-surface p-5">
+      <div className="flex items-baseline justify-between gap-3">
+        <h2 className="font-medium">Paid out</h2>
+        <p className="text-sm tabular-nums text-muted">{inr(total)}</p>
+      </div>
+      {rows.length > 0 ? (
+        <ul className="mt-3 divide-y divide-line">
+          {rows.map((row) => (
+            <li key={row.id} className="flex items-center justify-between gap-3 py-2 text-sm">
+              <span>
+                <span className="font-medium">{row.note || payoutLabel(row.category)}</span>
+                <span className="text-muted"> · {row.by}</span>
+              </span>
+              <span className="flex items-center gap-2">
+                <span className="tabular-nums">{inr(row.amount)}</span>
+                {locked ? null : (
+                <Button
+                  className="no-print"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    void removeCentrePayout({ data: row.id })
+                      .then(() => {
+                        onSaved("Payment successfully deleted.");
+                        onReload();
+                      })
+                      .catch((error: unknown) => onFailed(error instanceof Error ? error.message : "Payment was not deleted."));
+                  }}
+                >
+                  Delete
+                </Button>
+                )}
+              </span>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      {locked ? null : (
+      <form
+        className="no-print mt-3 grid gap-3 sm:grid-cols-2"
+        onSubmit={(event) => {
+          event.preventDefault();
+          const written = note.trim();
+          if (!written) {
+            onFailed("Write what was paid.");
+            return;
+          }
+          setPending(true);
+          void addCentrePayout({ data: { date, category: payoutKind(written), amount: amount ?? 0, note: written } })
+            .then(() => {
+              onAmount(null);
+              onNote("");
+              onSaved("Payment successfully saved.");
+              onReload();
+            })
+            .catch((error: unknown) => onFailed(error instanceof Error ? error.message : "Payment was not saved."))
+            .finally(() => setPending(false));
+        }}
+      >
+        <label className="block text-sm">
+          <span className="mb-1 block text-muted">What was paid</span>
+          <input
+            aria-label="What was paid"
+            className="h-11 w-full rounded-sm border border-line bg-bg px-3 text-base outline-none focus:border-accent"
+            value={note}
+            placeholder="eg. tea, stationery, donation"
+            onChange={(event) => onNote(event.target.value.slice(0, 80))}
+          />
+        </label>
+        <label className="block text-sm">
+          <span className="mb-1 block text-muted">Amount</span>
+          <MoneyField label="Amount paid" value={amount} onChange={onAmount} />
+        </label>
+        <div>
+          <Button type="submit" disabled={pending}>
+            Add payment
+          </Button>
+        </div>
+      </form>
+      )}
+    </section>
+  );
+}
+
+function ClosingParts({ cash, wallets, bank }: { cash: number; wallets: number; bank: number }) {
+  const parts = [
+    cash > 0 ? `Cash ${inr(cash)}` : null,
+    wallets > 0 ? `Wallets ${inr(wallets)}` : null,
+    bank > 0 ? `Bank ${inr(bank)}` : null,
+  ].filter((part): part is string => part != null);
+  if (parts.length < 2) return null;
+  return <p className="mt-1 text-base tabular-nums">{parts.join(" · ")}</p>;
 }
 
 function AccountTile({ label, count, total, tone }: { label: string; count: number; total: number; tone: "bad" | "warn" }) {
@@ -609,7 +858,7 @@ function AccountTile({ label, count, total, tone }: { label: string; count: numb
       <p className={cn("mt-1 font-display text-3xl tabular-nums", tone === "bad" ? "text-bad" : "text-warn")}>
         {count === 0 ? "None" : inr(total)}
       </p>
-      <p className="mt-1 text-sm text-muted">{count === 0 ? "No open days" : `${count} ${count === 1 ? "day" : "days"}`}</p>
+      {count > 0 ? <p className="mt-1 text-sm text-muted">{count} {count === 1 ? "day" : "days"}</p> : null}
     </div>
   );
 }
@@ -662,6 +911,31 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
   );
 }
 
+function ProfitMonth({ date, row, closes }: { date: string; row: CashClose; closes: CashClose[] }) {
+  const month = date.slice(0, 7);
+  const lines = [...closes.filter((item) => item.date !== date), row]
+    .filter((item) => item.date.startsWith(month) && (item.profitTaken ?? 0) > 0)
+    .sort((a, b) => (a.date < b.date ? -1 : 1));
+  const total = lines.reduce((sum, item) => sum + (item.profitTaken ?? 0), 0);
+  if (total <= 0) return null;
+  return (
+    <div className="mt-4">
+      <p className="text-sm text-muted">Transferred this month <span className="font-medium tabular-nums text-ink">{inr(total)}</span></p>
+      <ul className="mt-2 divide-y divide-line">
+        {lines.map((item) => (
+          <li key={item.date} className="flex items-center justify-between gap-3 py-2 text-sm">
+            <span>
+              {formatDay(item.date)}
+              {item.profitNote ? <span className="mt-0.5 block text-xs text-faint">{item.profitNote}</span> : null}
+            </span>
+            <span className="tabular-nums">{inr(item.profitTaken ?? 0)}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 function blank(date: string, credits = 0, countedBy = ""): CashClose {
   return {
     date,
@@ -675,6 +949,11 @@ function blank(date: string, credits = 0, countedBy = ""): CashClose {
     creditGiven: [],
     countedBy,
     accepted: false,
+    creditSeparate: true,
+    advanceHeld: 0,
+    advanceServed: 0,
+    profitTaken: 0,
+    profitNote: "",
   };
 }
 
@@ -682,6 +961,68 @@ function counterName(employees: Employee[], displayName: string | null | undefin
   const name = (displayName ?? "").trim();
   const match = employees.find((employee) => employee.active && employee.name.toLowerCase() === name.toLowerCase());
   return match?.name ?? "";
+}
+
+type AdvanceLine = { id: string; customer: string; mobile: string; service: string; staff: string; amount: number; date?: string };
+
+type AdvanceDraft = { id: string; customer: string; mobile: string; service: string; amount: string };
+
+function saveClosingAdvance(
+  edit: AdvanceDraft,
+  date: string,
+  setPending: (value: boolean) => void,
+  setEdit: (value: AdvanceDraft | null) => void,
+  setLive: (value: { held: number; lastDate: string; lastHeld: number; received: number; used: number; served: number; open: AdvanceLine[]; paid: AdvanceLine[] }) => void,
+  setResult: (value: Result | null) => void,
+) {
+  const amount = Number(edit.amount);
+  if (!edit.customer.trim() || !edit.service.trim() || !amount) {
+    setResult({ ok: false, message: "Enter the customer, the service, and the amount." });
+    return;
+  }
+  setPending(true);
+  void updateAdvance({ data: { id: edit.id, customer: edit.customer, mobile: edit.mobile, service: edit.service, amount } })
+    .then(() => closingAdvance({ data: date }))
+    .then((advance) => {
+      setLive(advance);
+      setEdit(null);
+      setResult({ ok: true, message: "Advance successfully updated." });
+    })
+    .catch((error: unknown) => setResult({ ok: false, message: error instanceof Error ? error.message : "Advance not updated." }))
+    .finally(() => setPending(false));
+}
+
+function AdvanceEditFields({
+  edit,
+  pending,
+  onChange,
+  onCancel,
+  onSave,
+}: {
+  edit: AdvanceDraft;
+  pending: boolean;
+  onChange: (value: AdvanceDraft) => void;
+  onCancel: () => void;
+  onSave: () => void;
+}) {
+  return (
+    <form
+      className="no-print mt-2 grid gap-2"
+      onSubmit={(event) => {
+        event.preventDefault();
+        onSave();
+      }}
+    >
+      <input aria-label="Customer name" className="h-11 rounded-sm border border-line bg-bg px-3 text-base outline-none focus:border-accent" value={edit.customer} onChange={(event) => onChange({ ...edit, customer: event.target.value })} />
+      <input aria-label="Mobile" inputMode="numeric" placeholder="Mobile, if any" className="h-11 rounded-sm border border-line bg-bg px-3 text-base outline-none focus:border-accent" value={edit.mobile} onChange={(event) => onChange({ ...edit, mobile: event.target.value })} />
+      <input aria-label="Service" className="h-11 rounded-sm border border-line bg-bg px-3 text-base outline-none focus:border-accent" value={edit.service} onChange={(event) => onChange({ ...edit, service: event.target.value })} />
+      <input aria-label="Amount" inputMode="numeric" className="h-11 rounded-sm border border-line bg-bg px-3 text-base outline-none focus:border-accent" value={edit.amount} onChange={(event) => onChange({ ...edit, amount: event.target.value.replace(/[^\d]/g, "") })} />
+      <div className="flex gap-2">
+        <Button type="submit" size="sm" disabled={pending}>{pending ? "Saving…" : "Save"}</Button>
+        <Button type="button" size="sm" variant="ghost" disabled={pending} onClick={onCancel}>Cancel</Button>
+      </div>
+    </form>
+  );
 }
 
 function downloadUnpaid(

@@ -13,6 +13,7 @@ import { useLedger } from "@/lib/ledger/store";
 import { readYear } from "@/lib/search";
 import { useMounted } from "@/lib/use-mounted";
 import { useTodayKey } from "@/lib/use-today";
+import { downloadWorkbook } from "@/lib/excel";
 import { cn } from "@/lib/cn";
 
 export const Route = createFileRoute("/centre")({
@@ -41,6 +42,7 @@ function CentrePage() {
       month,
       book.deductLwp,
       today,
+      book.payouts ?? [],
     ),
   );
   const visible = rows.filter((row) => row.month <= anchor || row.collection > 0 || row.expense > 0);
@@ -62,6 +64,8 @@ function CentrePage() {
   const pairedLast = paired.reduce((sum, row) => sum + (row.lastYearCompared ?? 0), 0);
   const growth = paired.length > 0 ? pairedCollection - pairedLast : null;
   const growthPct = pairedLast > 0 && growth != null ? (growth / pairedLast) * 100 : null;
+  const yearLast = visible.reduce((sum, row) => sum + (row.lastYear ?? 0), 0);
+  const yearLastKnown = visible.some((row) => row.lastYear != null);
 
   const chartRows = visible.map((row) => ({
     label: formatMonthShort(row.month),
@@ -75,9 +79,8 @@ function CentrePage() {
       <PageHeader
         kicker="CENTRE"
         title="Month performance"
-        lede="Net collection, expenses, staff pay, margin, and growth against the same month last year."
         actions={
-          <div className="flex items-center gap-2">
+          <div className="no-print flex items-center gap-2">
             <Button variant="secondary" size="icon" aria-label="Previous year" onClick={() => void navigate({ search: { fy: String(fy - 1) } })}>
               <ChevronLeft className="size-4" />
             </Button>
@@ -85,8 +88,37 @@ function CentrePage() {
             <Button variant="secondary" size="icon" aria-label="Next year" onClick={() => void navigate({ search: { fy: String(fy + 1) } })}>
               <ChevronRight className="size-4" />
             </Button>
-            <Button variant="secondary" className="no-print" onClick={() => window.print()}>
+            <Button variant="secondary" onClick={() => window.print()}>
               Print
+            </Button>
+            <Button
+              variant="secondary"
+              onClick={() =>
+                void downloadWorkbook(`Centre-${fyLabel(fy).replace(/\s+/g, "")}.xlsx`, [
+                  {
+                    name: "Centre",
+                    rows: [
+                      ["Month", "Net collection", "Expense", "Salary", "Margin", "Expense %", "Last year", "Growth", "Growth %"],
+                      ...rows.map((row) => {
+                        const future = row.month > anchor && row.collection === 0 && row.expense === 0;
+                        return [
+                          formatMonthShort(row.month),
+                          future ? "—" : row.collection,
+                          future ? "—" : row.expense + row.salary,
+                          future ? "—" : row.salary,
+                          future ? "—" : row.margin,
+                          future ? "—" : pct(costPct(row)),
+                          row.lastYear ?? "—",
+                          row.collection > 0 ? row.growth ?? 0 : "—",
+                          row.collection > 0 ? pct(row.growthPct) : "—",
+                        ];
+                      }),
+                    ],
+                  },
+                ])
+              }
+            >
+              Excel
             </Button>
           </div>
         }
@@ -94,13 +126,9 @@ function CentrePage() {
 
       <section className="print-stats grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Mini label="Net collection" value={inr(totals.collection)} />
-        <Mini
-          label="Expenses"
-          value={inr(totals.expense + totals.salary)}
-          hint={`${pct(totals.collection > 0 ? ((totals.expense + totals.salary) / totals.collection) * 100 : null)} · including salary`}
-        />
-        <Mini label="Margin" value={inr(totals.margin)} hint="After expenses, including salary" />
-        <Mini label="Growth" value={growth == null ? "—" : signedInr(growth)} hint={pct(growthPct)} />
+        <Mini label="Expenses" value={inr(totals.expense + totals.salary)} />
+        <Mini label="Margin" value={inr(totals.margin)} />
+        <Mini label="Growth" value={growth == null ? "—" : `${signedInr(growth)} · ${pct(growthPct)}`} />
       </section>
 
       <section className="print-chart mt-4 rounded-xl border border-line bg-surface p-5">
@@ -123,48 +151,57 @@ function CentrePage() {
             </ResponsiveContainer>
           ) : null}
         </div>
-        <p className="mt-2 text-xs text-faint">Grey is last year. Green is this year. The line is margin after expenses, including salary.</p>
       </section>
 
-      {selected ? <MonthDetail row={selected} onCommit={(amount) => book.setLastYear(selected.month, amount)} /> : null}
-
-      <div className="mt-4 overflow-x-auto rounded-xl border border-line bg-surface">
-        <table className="w-full min-w-[52rem] text-left text-sm">
-          <caption className="sr-only">Month wise centre performance</caption>
-          <thead className="text-xs tracking-wide text-faint">
-            <tr className="border-b border-line">
-              {["Month", "Net collection", "Expense", "Salary", "Margin", "Expense %", "Last year", "Growth", "Growth %"].map((head) => (
-                <th key={head} className="px-3 py-3 font-medium">
-                  {head}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row) => {
-              const future = row.month > anchor && row.collection === 0 && row.expense === 0;
-              return (
+      <section className="mt-4">
+        <h2 className="font-display text-2xl">Each month</h2>
+        <div className="mt-3 overflow-x-auto rounded-xl border border-line bg-surface">
+          <table className="w-full min-w-[52rem] text-left text-base">
+            <caption className="sr-only">Month wise centre performance</caption>
+            <thead className="text-xs tracking-wide text-faint">
+              <tr className="border-b border-line">
+                {["Month", "Net collection", "Expense", "Salary", "Margin", "Expense %", "Last year", "Growth", "Growth %"].map((head) => (
+                  <th key={head} className="px-3 py-3 font-medium">
+                    {head}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {visible.map((row) => (
                 <tr
                   key={row.month}
                   className={cn("cursor-pointer border-b border-line last:border-0", selected?.month === row.month && "bg-accent-soft")}
                   onClick={() => setPicked(row.month)}
                 >
                   <th className="px-3 py-3 font-medium">{formatMonthShort(row.month)}</th>
-                  <Cell>{future ? "—" : inr(row.collection)}</Cell>
-                  <Cell>{future ? "—" : inr(row.expense + row.salary)}</Cell>
-                  <Cell>{future ? "—" : inr(row.salary)}</Cell>
-                  <Cell>{future ? "—" : inr(row.margin)}</Cell>
-                  <Cell>{future ? "—" : pct(costPct(row))}</Cell>
+                  <Cell>{inr(row.collection)}</Cell>
+                  <Cell>{inr(row.expense + row.salary)}</Cell>
+                  <Cell>{inr(row.salary)}</Cell>
+                  <Cell tone={toneOf(row.margin)}>{inr(row.margin)}</Cell>
+                  <Cell>{pct(costPct(row))}</Cell>
                   <Cell>{row.lastYear == null ? "—" : inr(row.lastYear)}</Cell>
                   <Cell tone={toneOf(row.growth)}>{row.collection > 0 ? signedInr(row.growth) : "—"}</Cell>
                   <Cell tone={toneOf(row.growthPct)}>{row.collection > 0 ? pct(row.growthPct) : "—"}</Cell>
                 </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-      <p className="mt-2 text-xs text-muted">Expenses include salary. The salary column is the staff pay inside that figure, not an extra amount.</p>
+              ))}
+              <tr className="border-t border-line">
+                <th className="px-3 py-3 font-medium">Year</th>
+                <Cell>{inr(totals.collection)}</Cell>
+                <Cell>{inr(totals.expense + totals.salary)}</Cell>
+                <Cell>{inr(totals.salary)}</Cell>
+                <Cell tone={toneOf(totals.margin)}>{inr(totals.margin)}</Cell>
+                <Cell>{pct(totals.collection > 0 ? ((totals.expense + totals.salary) / totals.collection) * 100 : null)}</Cell>
+                <Cell>{yearLastKnown ? inr(yearLast) : "—"}</Cell>
+                <Cell tone={toneOf(growth)}>{growth == null ? "—" : signedInr(growth)}</Cell>
+                <Cell tone={toneOf(growthPct)}>{pct(growthPct)}</Cell>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      {selected ? <MonthDetail row={selected} onCommit={(amount) => book.setLastYear(selected.month, amount)} /> : null}
     </div>
   );
 }
@@ -173,29 +210,15 @@ function MonthDetail({ row, onCommit }: { row: CentreSnapshot; onCommit: (amount
   return (
     <section className="print-keep mt-4 rounded-xl border border-line bg-surface p-5">
       <h2 className="font-display text-2xl">{formatMonthShort(row.month)} in detail</h2>
-      <p className="mt-1 max-w-2xl text-sm text-muted">
-        {row.collection > 0
-          ? `Margin is ${inr(row.margin)} after ${inr(row.expense + row.salary)} of expenses, including ${inr(row.salary)} of salary. That is ${pct(costPct(row))} of collection.`
-          : "No collection entered for this month yet."}
-        {row.collection > 0 && row.growthPct != null ? ` Growth is ${pct(row.growthPct)} against last year.` : ""}
-      </p>
       <div className="print-stats mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <Mini label="Net collection" value={inr(row.collection)} hint="Month total" />
-        <Mini label="Expense %" value={pct(costPct(row))} hint={`${inr(row.expense + row.salary)} including salary`} />
-        <Mini label="Salary %" value={pct(row.salaryPct)} hint={inr(row.salary)} />
-        <Mini label="Margin %" value={pct(row.marginPct)} hint={inr(row.margin)} />
+        <Mini label="Net collection" value={inr(row.collection)} />
+        <Mini label="Expense %" value={pct(costPct(row))} />
+        <Mini label="Salary %" value={pct(row.salaryPct)} />
+        <Mini label="Margin %" value={pct(row.marginPct)} />
       </div>
       <label className="mt-4 block max-w-xs text-sm">
-        <span className="mb-1 block text-muted">
-          Last year, full month
-          {row.lastYearSource === "book" ? " (from last year’s month total — type to replace)" : row.lastYearSource === "entered" ? " (typed in)" : " (not in the book yet)"}
-        </span>
+        <span className="mb-1 block text-muted">Last year, full month</span>
         <MoneyField label="Last year collection" value={row.lastYear} onChange={onCommit} />
-        {row.lastYearPartial && row.lastYear != null && row.lastYearCompared != null ? (
-          <p className="mt-2 text-xs text-muted">
-            Growth uses the same working days so far, {inr(row.lastYearCompared)} of this {inr(row.lastYear)}. The full month stays {inr(row.lastYear)}.
-          </p>
-        ) : null}
       </label>
     </section>
   );
@@ -206,12 +229,11 @@ function costPct(row: CentreSnapshot): number | null {
   return ((row.expense + row.salary) / row.collection) * 100;
 }
 
-function Mini({ label, value, hint }: { label: string; value: string; hint?: string }) {
+function Mini({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-lg border border-line bg-bg p-4">
       <p className="text-xs font-semibold tracking-widest text-faint">{label.toUpperCase()}</p>
-      <p className="mt-1 font-display text-2xl tabular-nums">{value}</p>
-      {hint ? <p className="text-xs text-muted">{hint}</p> : null}
+      <p className="mt-1 font-display text-3xl tabular-nums">{value}</p>
     </div>
   );
 }

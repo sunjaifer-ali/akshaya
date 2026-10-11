@@ -5,8 +5,9 @@ import { MoneyField } from "@/components/money-field";
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import { ResultDialog, type Result } from "@/components/result-dialog";
-import { inr, pct } from "@/lib/format";
-import { expenseTotal, monthCollection, ratio, staffMonthRows } from "@/lib/ledger/calc";
+import { inr } from "@/lib/format";
+import { expenseTotal, monthCollection, payoutTotal, staffMonthRows } from "@/lib/ledger/calc";
+import { payoutLabel } from "@/lib/ledger/types";
 import { addMonths } from "@/lib/ledger/dates";
 import { useLedger } from "@/lib/ledger/store";
 import { readMonth } from "@/lib/search";
@@ -25,7 +26,9 @@ function ExpensesPage() {
   const book = useLedger();
   const [adding, setAdding] = useState("");
   const [result, setResult] = useState<Result | null>(null);
-  const total = expenseTotal(book.expenses, month);
+  const paidOut = payoutTotal(book.payouts, month);
+  const total = expenseTotal(book.expenses, month) + paidOut;
+  const otherPaid = payoutTotal(book.payouts, month, "other");
   const collection = monthCollection(book.days, month);
   const previous = addMonths(month, -1);
   const previousTotal = expenseTotal(book.expenses, previous);
@@ -51,7 +54,6 @@ function ExpensesPage() {
       <PageHeader
         kicker="SPEND"
         title="Expenses"
-        lede="Rent, electricity, internet, paper, ink, tea, maintenance — and any other column you need."
         actions={
           <MonthBar
             month={month}
@@ -76,10 +78,15 @@ function ExpensesPage() {
       </div>
 
       <div className="rounded-xl border border-line bg-surface px-4">
-        {book.categories.map((category) => (
+        {book.categories.map((category) => {
+          const counter = payoutTotal(book.payouts, month, category.id);
+          return (
           <div key={category.id} className="grid items-center gap-2 border-b border-line py-3 sm:grid-cols-[1fr_12rem_auto]">
             {category.builtin ? (
-              <p className="text-sm font-medium">{category.name}</p>
+              <div>
+                <p className="text-sm font-medium">{category.name}</p>
+                {counter > 0 ? <p className="text-xs text-faint">Paid out {inr(counter)}</p> : null}
+              </div>
             ) : (
               <input
                 aria-label={`Rename ${category.name}`}
@@ -101,7 +108,17 @@ function ExpensesPage() {
               </Button>
             )}
           </div>
-        ))}
+          );
+        })}
+        {otherPaid > 0 ? (
+          <div className="grid items-center gap-2 border-b border-line py-3 sm:grid-cols-[1fr_12rem]">
+            <div>
+              <p className="text-sm font-medium">{payoutLabel("other")}</p>
+              <p className="text-xs text-faint">Paid out during the month.</p>
+            </div>
+            <p className="text-base font-medium tabular-nums sm:text-right">{inr(otherPaid)}</p>
+          </div>
+        ) : null}
         <form
           className="flex flex-wrap gap-2 py-3"
           onSubmit={(event) => {
@@ -126,40 +143,36 @@ function ExpensesPage() {
             Add column
           </Button>
         </form>
-        <PayLine label="Salary" hint="Basic after unpaid leave. Worked out on Salary." value={inr(salary)} />
-        <PayLine label="Incentive" hint="Separate from salary. Not a percentage of collection." value={inr(incentive)} />
-        <PayLine label="Total salary" hint="Salary plus incentive." value={inr(totalSalary)} strong />
+        <PayLine label="Salary" value={inr(salary)} />
+        <PayLine label="Incentive" value={inr(incentive)} />
+        <PayLine label="Total salary" value={inr(totalSalary)} strong />
       </div>
 
       <section className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <Mini label="Expenses" value={inr(total)} hint={pct(ratio(total, collection)) + " of collection"} />
-        <Mini label="Total salary" value={inr(totalSalary)} hint="Salary plus incentive" />
-        <Mini label="Expenses + salary" value={inr(outflow)} hint={pct(ratio(outflow, collection)) + " of collection"} />
-        <Mini label="Left" value={collection > 0 ? inr(collection - outflow) : "—"} hint="After expenses and total salary" />
+        <Mini label="Expenses" value={inr(total)} />
+        <Mini label="Total salary" value={inr(totalSalary)} />
+        <Mini label="Expenses + salary" value={inr(outflow)} />
+        <Mini label="Left" value={collection > 0 ? inr(collection - outflow) : "—"} />
       </section>
       <ResultDialog result={result} onClose={() => setResult(null)} />
     </div>
   );
 }
 
-function PayLine({ label, hint, value, strong = false }: { label: string; hint: string; value: string; strong?: boolean }) {
+function PayLine({ label, value, strong = false }: { label: string; value: string; strong?: boolean }) {
   return (
     <div className={`grid items-center gap-2 border-t border-line py-3 sm:grid-cols-[1fr_12rem] ${strong ? "bg-surface-2 -mx-4 px-4" : ""}`}>
-      <div>
-        <p className={`text-sm ${strong ? "font-semibold" : "font-medium"}`}>{label}</p>
-        <p className="text-xs text-faint">{hint}</p>
-      </div>
-      <p className={`text-base tabular-nums sm:text-right ${strong ? "font-semibold" : "font-medium"}`}>{value}</p>
+      <p className={`text-base ${strong ? "font-semibold" : "font-medium"}`}>{label}</p>
+      <p className={`text-lg tabular-nums sm:text-right ${strong ? "font-semibold" : "font-medium"}`}>{value}</p>
     </div>
   );
 }
 
-function Mini({ label, value, hint }: { label: string; value: string; hint?: string }) {
+function Mini({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-xl border border-line bg-surface p-5">
       <p className="text-xs font-semibold tracking-widest text-faint">{label.toUpperCase()}</p>
-      <p className="mt-1 font-display text-2xl tabular-nums">{value}</p>
-      {hint ? <p className="mt-1 text-xs text-muted">{hint}</p> : null}
+      <p className="mt-1 font-display text-3xl tabular-nums">{value}</p>
     </div>
   );
 }

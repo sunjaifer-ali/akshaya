@@ -20,7 +20,7 @@ type LedgerState = LedgerData & {
   startEmpty: () => void;
   replaceBook: (data: LedgerData) => void;
   saveEmployee: (employee: Employee) => void;
-  removeEmployee: (id: string) => void;
+  setEmployeeActive: (id: string, active: boolean) => void;
   setDayAmount: (date: string, amount: number | null) => void;
   setMonthCollection: (month: string, amount: number | null) => void;
   importDay: (
@@ -70,8 +70,11 @@ function syncLeaves(state: Pick<LedgerData, "days" | "employees" | "holidays" | 
   for (const day of working) {
     for (const employee of state.employees) {
       if (!employee.active) continue;
-      if ((day.splits[employee.id] ?? 0) > 0) continue;
       const previous = state.leaves.find((mark) => mark.employeeId === employee.id && mark.date === day.date);
+      if ((day.splits[employee.id] ?? 0) > 0) {
+        if (previous?.code === "HD") marks.push({ employeeId: employee.id, date: day.date, code: "HD" });
+        continue;
+      }
       const code: LeaveCode = previous && previous.code !== "LWP" ? previous.code : "LWP";
       marks.push({ employeeId: employee.id, date: day.date, code });
     }
@@ -117,17 +120,9 @@ export const useLedger = create<LedgerState>()(
             : [...state.employees, employee];
           return { employees };
         }),
-      removeEmployee: (id) =>
+      setEmployeeActive: (id, active) =>
         set((state) => ({
-          employees: state.employees.filter((employee) => employee.id !== id),
-          leaves: state.leaves.filter((mark) => mark.employeeId !== id),
-          perfOverrides: state.perfOverrides.filter((item) => item.employeeId !== id),
-          days: state.days.map((day) => {
-            if (!(id in day.splits)) return day;
-            const splits = { ...day.splits };
-            delete splits[id];
-            return { ...day, splits };
-          }),
+          employees: state.employees.map((employee) => (employee.id === id ? { ...employee, active } : employee)),
         })),
       setDayAmount: (date, amount) =>
         set((state) => ({
@@ -325,6 +320,11 @@ export const useLedger = create<LedgerState>()(
               .filter((item) => item.amount > 0),
             countedBy: (close.countedBy ?? "").trim().slice(0, 80),
             accepted: Boolean(close.accepted),
+            advanceHeld: rupee(close.advanceHeld ?? 0),
+            advanceServed: rupee(close.advanceServed ?? 0),
+            profitTaken: rupee(close.profitTaken ?? 0),
+            profitNote: (close.profitNote ?? "").trim().slice(0, 80),
+            creditSeparate: Boolean(close.creditSeparate),
           };
           const rest = state.cashCloses.filter((item) => item.date !== close.date);
           const cashCloses = [...rest, next].sort((a, b) => (a.date < b.date ? -1 : 1));
@@ -337,7 +337,7 @@ export const useLedger = create<LedgerState>()(
     }),
     {
       name: "akshaya-thrikkadeeri-book",
-      version: 8,
+      version: 9,
       skipHydration: true,
       migrate: (persisted, version) => {
         if (version < 4) return buildCentreBook();
@@ -349,6 +349,10 @@ export const useLedger = create<LedgerState>()(
           creditGiven: row.creditGiven ?? [],
           countedBy: row.countedBy ?? "",
           accepted: Boolean(row.accepted),
+          advanceHeld: row.advanceHeld ?? 0,
+          advanceServed: row.advanceServed ?? 0,
+          profitTaken: row.profitTaken ?? 0,
+          profitNote: row.profitNote ?? "",
         }));
         return book;
       },

@@ -5,9 +5,9 @@ import { useEffect, useState } from "react";
 import { MonthBar } from "@/components/month-bar";
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
-import { presentDays, leaveTally } from "@/lib/ledger/calc";
 import { datesInMonth, formatDay, formatFull, formatMonth, formatMonthShort, isSunday, parseDate } from "@/lib/ledger/dates";
 import { useLedger } from "@/lib/ledger/store";
+import { downloadWorkbook } from "@/lib/excel";
 import { LEAVE_LABEL, type Employee, type LeaveCode, type LeaveMark } from "@/lib/ledger/types";
 import { readMonth } from "@/lib/search";
 import { useResolvedMonth, useTodayKey } from "@/lib/use-today";
@@ -45,7 +45,6 @@ function LeavePage() {
       <PageHeader
         kicker="ATTENDANCE"
         title="Leave register"
-        lede="Sundays are holidays. Tap a date number to mark any other holiday. On a finished working day, anyone with no collection is marked unpaid leave."
         actions={
           <MonthBar
             month={month}
@@ -114,22 +113,21 @@ function LeavePage() {
       {people.length > 0 ? (
         <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {people.map((employee) => {
-            const tally = leaveTally(book.leaves, employee.id, month);
-            const present = presentDays(book.leaves, employee.id, month, book.holidays);
+            const attendance = countAttendance(book.leaves, employee.id, month, book.holidays, today);
             return (
               <article key={employee.id} className="rounded-xl border border-line bg-surface p-5">
                 <h2 className="font-medium">{employee.name}</h2>
                 <dl className="mt-2 grid grid-cols-2 gap-y-1 text-sm">
                   <dt className="text-muted">Present</dt>
-                  <dd className="text-right tabular-nums">{present}</dd>
+                  <dd className="text-right tabular-nums">{attendance.present}</dd>
                   <dt className="text-muted">Casual</dt>
-                  <dd className="text-right tabular-nums">{tally.CL}</dd>
+                  <dd className="text-right tabular-nums">{attendance.tally.CL}</dd>
                   <dt className="text-muted">Sick</dt>
-                  <dd className="text-right tabular-nums">{tally.SL}</dd>
+                  <dd className="text-right tabular-nums">{attendance.tally.SL}</dd>
                   <dt className="text-muted">Unpaid</dt>
-                  <dd className="text-right tabular-nums">{tally.LWP}</dd>
+                  <dd className="text-right tabular-nums">{attendance.tally.LWP}</dd>
                   <dt className="text-muted">Half days</dt>
-                  <dd className="text-right tabular-nums">{tally.HD}</dd>
+                  <dd className="text-right tabular-nums">{attendance.tally.HD}</dd>
                 </dl>
               </article>
             );
@@ -201,9 +199,12 @@ function AttendanceReport({
             {formatFull(date)}. {formatMonth(reportMonth)} attendance, and leave for {year}.
           </p>
         </div>
-        <Button className="no-print" onClick={() => window.print()}>
-          Print report
-        </Button>
+        <div className="no-print flex gap-2">
+          <Button variant="secondary" onClick={() => void saveAttendanceExcel(centre, date, reportMonth, year, dates, months, rows, leaves, holidays, today)}>
+            Excel
+          </Button>
+          <Button onClick={() => window.print()}>Print report</Button>
+        </div>
       </div>
       <div className="no-print mb-4 flex flex-wrap items-end gap-3">
         <label className="block text-sm">
@@ -220,15 +221,18 @@ function AttendanceReport({
         </label>
         <label className="block text-sm">
           <span className="mb-1 block text-muted">Month</span>
-          <input
-            type="month"
+          <select
             aria-label="Report month"
             className="h-11 rounded-sm border border-line bg-bg px-3 text-base text-ink outline-none focus:border-accent"
             value={reportMonth}
-            onChange={(event) => {
-              if (event.target.value) chooseDate(shiftMonth(date, event.target.value));
-            }}
-          />
+            onChange={(event) => chooseDate(shiftMonth(date, event.target.value))}
+          >
+            {months.map((item) => (
+              <option key={item} value={item}>
+                {formatMonth(item)}
+              </option>
+            ))}
+          </select>
         </label>
         <label className="block text-sm">
           <span className="mb-1 block text-muted">Year</span>
@@ -246,7 +250,7 @@ function AttendanceReport({
           </select>
         </label>
       </div>
-      <p className="no-print mb-4 text-xs text-faint">Print or save as PDF to share. Landscape A4 keeps the days on one page.</p>
+      <p className="no-print mb-4 text-xs text-faint">In the print box, choose Landscape so the days stay upright on one page. Excel has the same figures.</p>
 
       <h3 className="font-medium">{formatFull(date)}</h3>
       <ul className="mt-2 divide-y divide-line rounded-xl border border-line bg-surface">
@@ -438,6 +442,68 @@ function leaveText(tally: Record<LeaveCode, number>): string {
 
 function trimHalf(n: number): string {
   return Number.isInteger(n) ? String(n) : n.toFixed(1);
+}
+
+function saveAttendanceExcel(
+  centre: string,
+  date: string,
+  reportMonth: string,
+  year: number,
+  dates: string[],
+  months: string[],
+  rows: {
+    employee: Employee;
+    month: ReturnType<typeof countAttendance>;
+    year: ReturnType<typeof countAttendance>[];
+  }[],
+  leaves: LeaveMark[],
+  holidays: string[],
+  today: string,
+) {
+  return downloadWorkbook(`Attendance-${centre.replace(/\s+/g, "-")}-${date}.xlsx`, [
+    {
+      name: "Day",
+      rows: [
+        ["Staff", "Status"],
+        ...rows.map((row) => [row.employee.name, dayLabel(leaves, row.employee.id, date, holidays, today)]),
+      ],
+    },
+    {
+      name: formatMonth(reportMonth).slice(0, 31),
+      rows: [
+        ["Staff", ...dates.map((item) => Number(item.slice(8))), "Present", "CL", "SL", "LWP", "HD", "Leave dates"],
+        ...rows.map((row) => [
+          row.employee.name,
+          ...dates.map((item) => dayMark(leaves, row.employee.id, item, holidays, today)),
+          row.month.present,
+          row.month.tally.CL,
+          row.month.tally.SL,
+          row.month.tally.LWP,
+          row.month.tally.HD,
+          row.month.dates.join(", "),
+        ]),
+      ],
+    },
+    {
+      name: `Year ${year}`,
+      rows: [
+        ["Staff", ...months.map((item) => formatMonthShort(item)), "CL", "SL", "LWP", "HD", "Present"],
+        ...rows.map((row) => {
+          const total = row.year.reduce(
+            (sum, item) => ({
+              CL: sum.CL + item.tally.CL,
+              SL: sum.SL + item.tally.SL,
+              LWP: sum.LWP + item.tally.LWP,
+              HD: sum.HD + item.tally.HD,
+              present: sum.present + item.present,
+            }),
+            { CL: 0, SL: 0, LWP: 0, HD: 0, present: 0 },
+          );
+          return [row.employee.name, ...row.year.map((item) => leaveText(item.tally)), total.CL, total.SL, total.LWP, total.HD, total.present];
+        }),
+      ],
+    },
+  ]).catch(() => undefined);
 }
 
 function DayCell({

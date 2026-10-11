@@ -41,11 +41,13 @@ function SalaryPage() {
   const salaryOnly = rows.reduce((sum, row) => sum + row.pay.basicPayable, 0);
   const incentive = rows.reduce((sum, row) => sum + row.pay.incentive, 0);
   const gross = salaryOnly + incentive;
+  const [picked, setPicked] = useState("");
   const [editing, setEditing] = useState<Employee | null>(null);
   const [open, setOpen] = useState(false);
-  const [slip, setSlip] = useState<string | "all" | null>(null);
+  const [slip, setSlip] = useState<string | null>(null);
   const [result, setResult] = useState<Result | null>(null);
-  const slipRows = slip === "all" ? rows : rows.filter((row) => row.employee.id === slip);
+  const slipRows = rows.filter((row) => row.employee.id === slip);
+  const shown = rows.find((row) => row.employee.id === picked) ?? rows[0];
 
   return (
     <>
@@ -53,7 +55,6 @@ function SalaryPage() {
       <PageHeader
         kicker="PAY"
         title="Salary"
-        lede="Salary is basic pay, minus unpaid leave at one day’s rate (basic ÷ 30). Incentive is a separate amount, not a percentage of collection. Salary % is the salary alone against what they collected."
         actions={
           <MonthBar
             month={month}
@@ -64,18 +65,16 @@ function SalaryPage() {
         }
       />
 
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-        <p className="text-sm text-muted">
-          Centre collection {inr(centre)}. Salary {inr(salaryOnly)}, incentive {inr(incentive)}, total salary {inr(gross)}
-          {centre > 0 ? `. Salary is ${pct(centre > 0 ? (salaryOnly / centre) * 100 : null)} of the centre` : ""}.
-          {rows[0] && rows[0].pay.elapsedDays < rows[0].pay.workingDays
-            ? ` Basic is counted for ${rows[0].pay.elapsedDays} of ${rows[0].pay.workingDays} working days so far.`
-            : ""}
-        </p>
-        <div className="flex flex-wrap gap-2">
-          {rows.length > 0 ? (
-            <Button variant="secondary" onClick={() => setSlip("all")}>
-              Salary slips
+      <div className="mb-4 grid gap-3 sm:grid-cols-4">
+        <Mini label="Centre collection" value={inr(centre)} />
+        <Mini label="Salary" value={inr(salaryOnly)} />
+        <Mini label="Incentive" value={inr(incentive)} />
+        <Mini label="Total salary" value={inr(gross)} />
+      </div>
+      <div className="mb-4 flex flex-wrap gap-2">
+          {shown ? (
+            <Button variant="secondary" onClick={() => setSlip(shown.employee.id)}>
+              Salary slip
             </Button>
           ) : null}
           <Button
@@ -87,7 +86,6 @@ function SalaryPage() {
             Add employee
           </Button>
         </div>
-      </div>
 
       {centre > 0 && staffCollection > centre ? (
         <p className="mb-4 rounded-lg border border-line bg-warn-soft px-4 py-3 text-sm text-warn">
@@ -101,20 +99,43 @@ function SalaryPage() {
         </div>
       ) : (
         <div className="grid gap-3">
-          {rows.map((row) => (
+          <label className="block max-w-xs text-sm">
+            <span className="mb-1 block text-muted">Employee</span>
+            <select
+              aria-label="Employee"
+              className="h-11 w-full rounded-sm border border-line bg-bg px-3 text-base text-ink outline-none focus:border-accent"
+              value={shown?.employee.id ?? ""}
+              onChange={(event) => setPicked(event.target.value)}
+            >
+              {rows.map((row) => (
+                <option key={row.employee.id} value={row.employee.id}>
+                  {row.employee.name}
+                  {row.employee.active ? "" : " (inactive)"}
+                </option>
+              ))}
+            </select>
+          </label>
+          {shown ? (
             <PayCard
-              key={row.employee.id}
-              row={row}
+              key={shown.employee.id}
+              row={shown}
               month={month}
-              bookAmount={employeeSplitSum(book.days, row.employee.id, month)}
+              bookAmount={employeeSplitSum(book.days, shown.employee.id, month)}
               onEdit={() => {
-                setEditing(row.employee);
+                setEditing(shown.employee);
                 setOpen(true);
               }}
-              onSlip={() => setSlip(row.employee.id)}
-              onRemoved={() => setResult({ ok: true, message: `${row.employee.name} successfully removed.` })}
+              onSlip={() => setSlip(shown.employee.id)}
+              onRemoved={() =>
+                setResult({
+                  ok: true,
+                  message: shown.employee.active
+                    ? `${shown.employee.name} is deactivated. Past collection and pay stay in the book.`
+                    : `${shown.employee.name} is active again.`,
+                })
+              }
             />
-          ))}
+          ) : null}
         </div>
       )}
 
@@ -171,8 +192,7 @@ function PayCard({
   const setPerformance = useLedger((state) => state.setPerformance);
   const clearPerformance = useLedger((state) => state.clearPerformance);
   const saveEmployee = useLedger((state) => state.saveEmployee);
-  const removeEmployee = useLedger((state) => state.removeEmployee);
-  const [confirmDelete, setConfirmDelete] = useState(false);
+  const setEmployeeActive = useLedger((state) => state.setEmployeeActive);
   const salaryPct = row.pay.salaryPct;
   const heavy = salaryPct != null && salaryPct >= 40;
 
@@ -194,20 +214,16 @@ function PayCard({
           <Button variant="secondary" size="sm" onClick={onEdit}>
             Edit
           </Button>
-          {confirmDelete ? (
-            <>
-              <Button size="sm" variant="danger" onClick={() => { removeEmployee(row.employee.id); setConfirmDelete(false); onRemoved(); }}>
-                Delete {row.employee.name}
-              </Button>
-              <Button size="sm" variant="secondary" onClick={() => setConfirmDelete(false)}>
-                Keep
-              </Button>
-            </>
-          ) : (
-            <Button size="sm" variant="ghost" onClick={() => setConfirmDelete(true)}>
-              Delete
-            </Button>
-          )}
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={() => {
+              setEmployeeActive(row.employee.id, !row.employee.active);
+              onRemoved();
+            }}
+          >
+            {row.employee.active ? "Deactivate" : "Activate"}
+          </Button>
         </div>
       </div>
 
@@ -280,11 +296,6 @@ function PayCard({
           style={{ width: `${Math.min(salaryPct ?? 0, 100)}%` }}
         />
       </div>
-      <p className="mt-2 text-sm text-muted">
-        {row.collection > 0
-          ? `${row.employee.name.split(" ")[0]}’s salary of ${inr(row.pay.basicPayable)} is ${pct(salaryPct)} of the ${inr(row.collection)} they collected. Incentive of ${inr(row.pay.incentive)} is separate, so total salary is ${inr(row.pay.gross)}.`
-          : "Enter their collection to see what percentage of it their salary takes."}
-      </p>
     </article>
   );
 }
@@ -293,7 +304,7 @@ function Mini({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-xl border border-line bg-surface p-5">
       <p className="text-xs font-semibold tracking-widest text-faint">{label.toUpperCase()}</p>
-      <p className="mt-1 font-display text-2xl tabular-nums">{value}</p>
+      <p className="mt-1 font-display text-3xl tabular-nums">{value}</p>
     </div>
   );
 }

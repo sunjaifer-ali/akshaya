@@ -18,7 +18,6 @@ export function StaffDialog({
   onResult: (result: { ok: boolean; message: string }) => void;
 }) {
   const saveEmployee = useLedger((state) => state.saveEmployee);
-  const removeEmployee = useLedger((state) => state.removeEmployee);
   const [draft, setDraft] = useState<Employee>(() => employee ?? fresh());
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState(DEFAULT_STAFF_PASSWORD);
@@ -148,15 +147,21 @@ export function StaffDialog({
           {employee ? (
             <Button
               type="button"
-              variant="danger"
+              variant="secondary"
               onClick={() => {
-                const name = employee.name;
-                removeEmployee(employee.id);
+                const name = draft.name.trim() || employee.name;
+                const active = !draft.active;
+                saveEmployee({ ...draft, name, role: draft.role.trim() || "Staff", active });
                 onOpenChange(false);
-                onResult({ ok: true, message: `${name} successfully removed.` });
+                onResult({
+                  ok: true,
+                  message: active
+                    ? `${name} is active again.`
+                    : `${name} is deactivated. Past collection and pay stay in the book.`,
+                });
               }}
             >
-              Delete
+              {draft.active ? "Deactivate" : "Activate"}
             </Button>
           ) : null}
         </div>

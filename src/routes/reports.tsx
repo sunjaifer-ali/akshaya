@@ -5,10 +5,12 @@ import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/cn";
 import { inr, pct, signedInr } from "@/lib/format";
-import { centreSnapshot, recordedAttendance, staffMonthRows, type CentreSnapshot, type MonthAttendance, type StaffMonthRow } from "@/lib/ledger/calc";
+import { centreSnapshot, recordedAttendance, staffMonthRows, payoutTotal, type CentreSnapshot, type MonthAttendance, type StaffMonthRow } from "@/lib/ledger/calc";
 import { addDays, formatDay, formatMonthShort, fyLabel, fyMonths, fyStartYear } from "@/lib/ledger/dates";
 import { loginLog } from "@/lib/centre.functions";
+import { downloadWorkbook, type Sheet } from "@/lib/excel";
 import { useLedger } from "@/lib/ledger/store";
+import type { Employee, LedgerData } from "@/lib/ledger/types";
 import { readReport, type ReportKind } from "@/lib/search";
 import { useTodayKey } from "@/lib/use-today";
 
@@ -47,6 +49,7 @@ function ReportsPage() {
       month,
       book.deductLwp,
       today,
+      book.payouts ?? [],
     ),
   );
   const shown = snaps.filter((row) => monthCounts(row, anchor, book.leaves));
@@ -65,8 +68,16 @@ function ReportsPage() {
     ),
   }));
 
+  const [excelNote, setExcelNote] = useState("");
   const go = (nextFy: number, nextKind: ReportKind, nextDate = logDate) => {
     void navigate({ search: { fy: String(nextFy), r: nextKind, d: nextDate || undefined } });
+  };
+  const saveExcel = () => {
+    setExcelNote("");
+    void buildReportWorkbook(kind, fyLabel(fy), logDate, shown, people, book)
+      .then((file) => downloadWorkbook(file.name, file.sheets))
+      .then(() => setExcelNote("Excel file downloaded."))
+      .catch((error: unknown) => setExcelNote(error instanceof Error ? error.message : "Excel file was not created."));
   };
 
   return (
@@ -74,10 +85,9 @@ function ReportsPage() {
       <PageHeader
         kicker="REPORTS"
         title={titleOf(kind)}
-        lede={ledeOf(kind, fyLabel(fy))}
         actions={
           kind === "logins" ? (
-            <div className="flex items-center gap-2">
+            <div className="no-print flex items-center gap-2">
               <Button variant="secondary" size="icon" aria-label="Previous day" onClick={() => go(fy, kind, addDays(logDate, -1))}>
                 <ChevronLeft className="size-4" />
               </Button>
@@ -93,12 +103,15 @@ function ReportsPage() {
               <Button variant="secondary" size="icon" aria-label="Next day" onClick={() => go(fy, kind, addDays(logDate, 1))}>
                 <ChevronRight className="size-4" />
               </Button>
-              <Button variant="secondary" className="no-print" onClick={() => window.print()}>
+              <Button variant="secondary" onClick={() => window.print()}>
                 Print
+              </Button>
+              <Button variant="secondary" onClick={saveExcel}>
+                Excel
               </Button>
             </div>
           ) : (
-          <div className="flex items-center gap-2">
+          <div className="no-print flex items-center gap-2">
             <Button variant="secondary" size="icon" aria-label="Previous year" onClick={() => go(fy - 1, kind)}>
               <ChevronLeft className="size-4" />
             </Button>
@@ -106,15 +119,18 @@ function ReportsPage() {
             <Button variant="secondary" size="icon" aria-label="Next year" onClick={() => go(fy + 1, kind)}>
               <ChevronRight className="size-4" />
             </Button>
-            <Button variant="secondary" className="no-print" onClick={() => window.print()}>
+            <Button variant="secondary" onClick={() => window.print()}>
               Print
+            </Button>
+            <Button variant="secondary" onClick={saveExcel}>
+              Excel
             </Button>
           </div>
           )
         }
       />
 
-      <p className="no-print mb-3 text-xs text-faint">Prints on landscape A4 so every column stays on the page.</p>
+      {excelNote ? <p className="no-print mb-3 text-sm text-muted">{excelNote}</p> : null}
       <div className="no-print mb-4 flex flex-wrap gap-2" role="tablist" aria-label="Consolidated reports">
         {MENU.map((item) => (
           <button
@@ -150,6 +166,10 @@ function ReportsPage() {
   );
 }
 
+function columnSpend(book: Pick<LedgerData, "expenses" | "payouts">, month: string, categoryId: string): number {
+  return (book.expenses[month]?.[categoryId] ?? 0) + payoutTotal(book.payouts, month, categoryId);
+}
+
 function monthCounts(row: CentreSnapshot, anchor: string, leaves: { date: string }[]): boolean {
   if (row.collection > 0 || row.expense > 0) return true;
   if (row.month === anchor) return true;
@@ -164,12 +184,177 @@ function titleOf(kind: ReportKind): string {
   return "Centre statement";
 }
 
-function ledeOf(kind: ReportKind, year: string): string {
-  if (kind === "staff") return `${year}. Collection, pay, and salary as a percentage of what each person brought in.`;
-  if (kind === "expenses") return `${year}. Rent, power, paper, and every other column, then salary and margin.`;
-  if (kind === "leave") return `${year}. Present days over the days already entered. Unpaid days reduce basic pay.`;
-  if (kind === "logins") return "Who signed in, on which device, and the city of that network when it is known. Pick a date.";
-  return `${year}. Net collection, costs, margin, and growth against last year. Total cost is expenses plus salary.`;
+async function buildReportWorkbook(
+  kind: ReportKind,
+  yearLabel: string,
+  logDate: string,
+  shown: CentreSnapshot[],
+  people: { month: string; rows: StaffMonthRow[] }[],
+  book: LedgerData,
+): Promise<{ name: string; sheets: Sheet[] }> {
+  const safeYear = yearLabel.replace(/\s+/g, "");
+  if (kind === "logins") {
+    const rows = logDate ? await loginLog({ data: logDate }) : [];
+    return {
+      name: `Login-log-${logDate || "date"}.xlsx`,
+      sheets: [
+        {
+          name: "Logins",
+          rows: [
+            ["Name", "Role", "Time", "Device", "Screen"],
+            ...rows.map((row) => [
+              row.name,
+              row.role,
+              new Date(row.at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" }),
+              row.device,
+              row.screen,
+            ]),
+          ],
+        },
+      ],
+    };
+  }
+  if (kind === "staff") {
+    const staff = staffInYear(people);
+    const centre = shown.reduce((sum, row) => sum + row.collection, 0);
+    return {
+      name: `Staff-and-pay-${safeYear}.xlsx`,
+      sheets: [
+        {
+          name: "Pay",
+          rows: [
+            ["Staff", "Collection", "Share", "Salary", "Salary %", "Incentive", "Total salary", "Unpaid days"],
+            ...staff.map((employee) => {
+              const mine = people.flatMap((month) => month.rows.filter((row) => row.employee.id === employee.id));
+              const collection = mine.reduce((sum, row) => sum + row.collection, 0);
+              const salary = mine.reduce((sum, row) => sum + row.pay.basicPayable, 0);
+              const incentive = mine.reduce((sum, row) => sum + row.pay.incentive, 0);
+              const lwp = mine.reduce((sum, row) => sum + row.pay.lwpDays, 0);
+              return [employee.name, collection, centre > 0 ? pct((collection / centre) * 100) : "—", salary, collection > 0 ? pct((salary / collection) * 100) : "—", incentive, salary + incentive, lwp];
+            }),
+          ],
+        },
+        {
+          name: "Monthly collection",
+          rows: [
+            ["Staff", ...shown.map((row) => formatMonthShort(row.month))],
+            ...staff.map((employee) => [
+              employee.name,
+              ...people.map((month) => month.rows.find((row) => row.employee.id === employee.id)?.collection ?? 0),
+            ]),
+          ],
+        },
+      ],
+    };
+  }
+  if (kind === "expenses") {
+    const categories = book.categories.filter(
+      (category) => category.builtin || shown.some((row) => (book.expenses[row.month]?.[category.id] ?? 0) > 0),
+    );
+    const months = shown.map((row) => formatMonthShort(row.month));
+    const line = (label: string, values: number[]) => [label, ...values, values.reduce((sum, amount) => sum + amount, 0)];
+    return {
+      name: `Expenses-${safeYear}.xlsx`,
+      sheets: [
+        {
+          name: "Expenses",
+          rows: [
+            ["Column", ...months, "Total"],
+            ...categories.map((category) =>
+              line(
+                category.name,
+                shown.map((row) => columnSpend(book, row.month, category.id)),
+              ),
+            ),
+            ...(shown.some((row) => payoutTotal(book.payouts, row.month, "other") > 0)
+              ? [line("Other", shown.map((row) => payoutTotal(book.payouts, row.month, "other")))]
+              : []),
+            line("Expenses", shown.map((row) => row.expense)),
+            line("Salary", shown.map((row) => row.basicPay)),
+            line("Incentive", shown.map((row) => row.incentive)),
+            line("Total salary", shown.map((row) => row.salary)),
+            line("Total cost", shown.map((row) => row.expense + row.salary)),
+            line("Margin", shown.map((row) => row.margin)),
+          ],
+        },
+      ],
+    };
+  }
+  if (kind === "leave") {
+    const active = book.employees.filter((employee) => onLeaveReport(employee, shown, book));
+    return {
+      name: `Leave-${safeYear}.xlsx`,
+      sheets: [
+        {
+          name: "Leave",
+          rows: [
+            ["Staff", ...shown.map((row) => formatMonthShort(row.month)), "Present", "Working", "Unpaid"],
+            ...active.map((employee) => {
+              const months = shown.map((row) =>
+                employee.active || involved(employee.id, row.month, book)
+                  ? recordedAttendance(book.days, book.leaves, employee.id, row.month, book.holidays)
+                  : blankAttendance(),
+              );
+              const present = months.reduce((sum, item) => sum + item.present, 0);
+              const working = months.reduce((sum, item) => sum + item.working, 0);
+              const unpaid = months.reduce((sum, item) => sum + item.tally.LWP, 0);
+              return [
+                employee.name,
+                ...months.map((item) => (item.working > 0 ? `${countLabel(item.present)}/${item.working}${leaveBits(item.tally) ? ` ${leaveBits(item.tally)}` : ""}` : leaveBits(item.tally) || "—")),
+                countLabel(present),
+                working,
+                unpaid,
+              ];
+            }),
+          ],
+        },
+      ],
+    };
+  }
+  const totals = shown.reduce(
+    (sum, row) => ({ collection: sum.collection + row.collection, expense: sum.expense + row.expense, salary: sum.salary + row.salary, margin: sum.margin + row.margin }),
+    { collection: 0, expense: 0, salary: 0, margin: 0 },
+  );
+  const cost = totals.expense + totals.salary;
+  const paired = shown.filter((row) => row.lastYear != null && row.collection > 0);
+  const pairedLast = paired.reduce((sum, row) => sum + (row.lastYearCompared ?? 0), 0);
+  const growth = paired.length > 0 ? paired.reduce((sum, row) => sum + row.collection, 0) - pairedLast : null;
+  return {
+    name: `Centre-statement-${safeYear}.xlsx`,
+    sheets: [
+      {
+        name: "Centre",
+        rows: [
+          ["Month", "Net collection", "Expenses", "Total salary", "Total cost", "Margin", "Cost %", "Last year", "Growth", "Growth %"],
+          ...shown.map((row) => {
+            const totalCost = row.expense + row.salary;
+            const started = row.collection > 0;
+            return [
+              formatMonthShort(row.month),
+              row.collection,
+              row.expense,
+              row.salary,
+              totalCost,
+              row.margin,
+              started ? pct((totalCost / row.collection) * 100) : "—",
+              row.lastYear ?? "—",
+              started ? row.growth ?? 0 : "—",
+              started ? pct(row.growthPct) : "—",
+            ];
+          }),
+          ["Total", totals.collection, totals.expense, totals.salary, cost, totals.margin, totals.collection > 0 ? pct((cost / totals.collection) * 100) : "—", pairedLast > 0 ? pairedLast : "—", growth ?? "—", pct(pairedLast > 0 && growth != null ? (growth / pairedLast) * 100 : null)],
+        ],
+      },
+    ],
+  };
+}
+
+function isAppHost(ip: string) {
+  const match = /^(\d+)\.(\d+)\./.exec(ip);
+  if (!match) return false;
+  const first = Number(match[1]);
+  const second = Number(match[2]);
+  return first === 8 && second >= 228 && second <= 237;
 }
 
 function LoginStatement({ date }: { date: string }) {
@@ -200,9 +385,7 @@ function LoginStatement({ date }: { date: string }) {
                   {[row.device, row.screen ? `screen ${row.screen}` : ""].filter(Boolean).join(" · ")}
                 </span>
               ) : null}
-              {row.place || row.ip ? (
-                <span className="mt-0.5 block text-xs text-faint">{[row.place, row.ip].filter(Boolean).join(" · ")}</span>
-              ) : null}
+              {row.place && !isAppHost(row.ip) ? <span className="mt-0.5 block text-xs text-faint">{row.place}</span> : null}
             </span>
             <span className="shrink-0 tabular-nums text-muted">
               {new Date(row.at).toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour: "numeric", minute: "2-digit" })}
@@ -288,7 +471,7 @@ function StaffStatement({
   shown: CentreSnapshot[];
   people: { month: string; rows: StaffMonthRow[] }[];
 }) {
-  const staff = people[0]?.rows.map((row) => row.employee) ?? [];
+  const staff = staffInYear(people);
   const centre = shown.reduce((sum, row) => sum + row.collection, 0);
 
   return (
@@ -386,7 +569,7 @@ function ExpenseStatement({ shown }: { shown: CentreSnapshot[] }) {
         </thead>
         <tbody>
           {categories.map((category) => {
-            const amounts = shown.map((row) => book.expenses[row.month]?.[category.id] ?? 0);
+            const amounts = shown.map((row) => columnSpend(book, row.month, category.id));
             const total = amounts.reduce((sum, amount) => sum + amount, 0);
             return (
               <tr key={category.id} className="border-b border-line">
@@ -398,6 +581,16 @@ function ExpenseStatement({ shown }: { shown: CentreSnapshot[] }) {
               </tr>
             );
           })}
+          {shown.some((row) => payoutTotal(book.payouts, row.month, "other") > 0) ? (
+            <tr className="border-b border-line">
+              <th className="sticky left-0 bg-surface px-3 py-3 text-left font-medium whitespace-nowrap">Other</th>
+              {shown.map((row) => {
+                const amount = payoutTotal(book.payouts, row.month, "other");
+                return <Cell key={row.month}>{amount > 0 ? inr(amount) : "—"}</Cell>;
+              })}
+              <Cell>{inr(shown.reduce((sum, row) => sum + payoutTotal(book.payouts, row.month, "other"), 0))}</Cell>
+            </tr>
+          ) : null}
           <tr className="border-b border-line bg-surface-2 font-medium">
             <th className="sticky left-0 bg-surface-2 px-3 py-3 text-left">Expenses</th>
             {shown.map((row) => (
@@ -450,10 +643,12 @@ function ExpenseStatement({ shown }: { shown: CentreSnapshot[] }) {
 
 function LeaveStatement({ shown }: { shown: CentreSnapshot[] }) {
   const book = useLedger();
-  const people = book.employees.filter((employee) => employee.active);
+  const people = book.employees.filter((employee) => onLeaveReport(employee, shown, book));
   const rows = people.map((employee) => {
     const months = shown.map((row) =>
-      recordedAttendance(book.days, book.leaves, employee.id, row.month, book.holidays),
+      employee.active || involved(employee.id, row.month, book)
+        ? recordedAttendance(book.days, book.leaves, employee.id, row.month, book.holidays)
+        : blankAttendance(),
     );
     const year = months.reduce(
       (sum, item) => ({
@@ -468,12 +663,6 @@ function LeaveStatement({ shown }: { shown: CentreSnapshot[] }) {
 
   return (
     <div>
-      <p className="no-print mb-3 text-sm text-muted">
-        <Link to="/leave" className="font-medium text-accent">
-          Day register
-        </Link>{" "}
-        marks a holiday or prints one person’s attendance. 21/22 means present out of the working days already entered.
-      </p>
       <div className="overflow-x-auto rounded-xl border border-line bg-surface">
         <table className="w-full text-left text-sm">
           <caption className="sr-only">Present days and leave</caption>
@@ -529,6 +718,29 @@ function leaveBits(tally: { CL: number; SL: number; LWP: number; HD: number }): 
   if (tally.LWP) parts.push(`${tally.LWP} LWP`);
   if (tally.HD) parts.push(`${tally.HD} HD`);
   return parts.join(" · ");
+}
+
+function staffInYear(people: { rows: StaffMonthRow[] }[]): Employee[] {
+  const seen = new Map<string, Employee>();
+  for (const month of people) {
+    for (const row of month.rows) seen.set(row.employee.id, row.employee);
+  }
+  return [...seen.values()];
+}
+
+function involved(id: string, month: string, book: LedgerData): boolean {
+  if (book.leaves.some((mark) => mark.employeeId === id && mark.date.startsWith(month))) return true;
+  if (book.days.some((day) => day.date.startsWith(month) && (day.splits[id] ?? 0) > 0)) return true;
+  return (book.perfOverrides ?? []).some((item) => item.employeeId === id && item.month === month && item.amount > 0);
+}
+
+function onLeaveReport(employee: Employee, shown: { month: string }[], book: LedgerData): boolean {
+  if (employee.active) return true;
+  return shown.some((row) => involved(employee.id, row.month, book));
+}
+
+function blankAttendance(): MonthAttendance {
+  return { present: 0, working: 0, tally: { CL: 0, SL: 0, LWP: 0, HD: 0, WO: 0 } };
 }
 
 function countLabel(value: number): string {

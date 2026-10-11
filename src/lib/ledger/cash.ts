@@ -108,7 +108,16 @@ export function countStarted(row: CashClose): boolean {
 }
 
 export function closingTotal(row: CashClose): number {
-  return cashInHand(row.notes) + row.eDistrict + row.csc + row.credits + row.bank;
+  return moneyInHand(row) + (row.credits || 0);
+}
+
+export function moneyInHand(row: CashClose): number {
+  return cashInHand(row.notes) + row.eDistrict + row.csc + row.bank;
+}
+
+function closeBase(row: CashClose): number {
+  if (row.creditSeparate) return moneyInHand(row);
+  return closingTotal(row);
 }
 
 export function previousClose(rows: CashClose[], date: string): CashClose | null {
@@ -148,39 +157,77 @@ export type CloseCheck = {
   movement: number | null;
   collected: number | null;
   personalGpay: number;
+  departmentGpay: number;
+  bankDepartment: number;
+  advanceHeld: number;
+  advanceChange: number;
+  advanceServed: number;
+  profitTaken: number;
+  paidOut: number;
   missing: string[];
   difference: number | null;
   unfixed: number | null;
 };
+
+function closeGap(row: CashClose, last: CashClose | null) {
+  return {
+    advanceHeld: row.advanceHeld ?? 0,
+    advanceChange: (row.advanceHeld ?? 0) - (last?.advanceHeld ?? 0),
+    advanceServed: row.advanceServed ?? 0,
+    profitTaken: row.profitTaken ?? 0,
+  };
+}
 
 export function checkClose(
   row: CashClose,
   closes: CashClose[],
   days: CollectionDay[],
   holidays: string[],
+  payouts: { date: string; amount: number }[] = [],
 ): CloseCheck {
   const last = previousClose(closes, row.date);
+  const gap = closeGap(row, last);
   if (!last) {
-    return { last: null, lastDate: "", movement: null, collected: null, personalGpay: 0, missing: [], difference: null, unfixed: null };
+    return { last: null, lastDate: "", movement: null, collected: null, personalGpay: 0, departmentGpay: 0, bankDepartment: 0, paidOut: 0, ...gap, advanceChange: 0, advanceServed: 0, missing: [], difference: null, unfixed: null };
   }
   const span = spanDates(last.date, row.date);
+  const paidOut = payouts.reduce((sum, item) => (span.includes(item.date) ? sum + (item.amount || 0) : sum), 0);
   const missing = span.filter((date) => !isSunday(date) && !holidays.includes(date) && aewsCollection(days, date) == null);
   const known = span.reduce((sum, date) => sum + (aewsCollection(days, date) ?? 0), 0);
   const personalGpay = span.reduce((sum, date) => sum + (days.find((item) => item.date === date)?.personalGpay ?? 0), 0);
-  const movement = closingTotal(row) - closingTotal(last);
+  const departmentGpay = span.reduce((sum, date) => sum + (days.find((item) => item.date === date)?.departmentGpay ?? 0), 0);
+  const bankDepartment = span.reduce((sum, date) => sum + (days.find((item) => item.date === date)?.bankDepartment ?? 0), 0);
+  let previous = closeBase(last);
+  let movement = closeBase(row) - previous;
   if (!countStarted(row) && !row.accepted) {
-    return { last: closingTotal(last), lastDate: last.date, movement, collected: missing.length > 0 ? null : known, personalGpay, missing, difference: null, unfixed: null };
+    return { last: closeBase(last), lastDate: last.date, movement, collected: missing.length > 0 ? null : known, personalGpay, departmentGpay, bankDepartment, paidOut, ...gap, missing, difference: null, unfixed: null };
   }
   if (missing.length > 0) {
-    return { last: closingTotal(last), lastDate: last.date, movement, collected: null, personalGpay, missing, difference: null, unfixed: null };
+    return { last: closeBase(last), lastDate: last.date, movement, collected: null, personalGpay, departmentGpay, bankDepartment, paidOut, ...gap, missing, difference: null, unfixed: null };
   }
-  const difference = movement - (known - personalGpay);
+  const spanRows = [...closes.filter((item) => span.includes(item.date) && item.date !== row.date), row];
+  const creditGiven = spanRows.reduce((sum, item) => sum + creditGivenTotal(item), 0);
+  const creditPaid = spanRows.reduce((sum, item) => sum + creditPaidTotal(item), 0);
+  let raw = movement - (known - personalGpay) - gap.advanceChange + gap.profitTaken + paidOut + bankDepartment - creditPaid;
+  let difference = raw < 0 ? Math.min(0, raw + creditGiven) : raw;
+  const alreadyOpen = Math.max(0, (row.credits || 0) - creditGiven);
+  if (difference > 0 && alreadyOpen > 0) {
+    const keep = Math.min(difference, alreadyOpen);
+    previous += keep;
+    movement -= keep;
+    difference -= keep;
+  }
+  if (difference > 0 && creditGiven > 0) difference = Math.max(0, difference - creditGiven);
   return {
-    last: closingTotal(last),
+    last: previous,
     lastDate: last.date,
     movement,
     collected: known,
     personalGpay,
+    departmentGpay,
+    bankDepartment,
+    paidOut,
+    ...gap,
     missing: [],
     difference,
     unfixed: unfixedAmount(difference, row.fixed),
@@ -193,11 +240,16 @@ export type AccountLine = {
   unfixed: number;
 };
 
-export function accountLines(closes: CashClose[], days: CollectionDay[], holidays: string[]): AccountLine[] {
+export function accountLines(
+  closes: CashClose[],
+  days: CollectionDay[],
+  holidays: string[],
+  payouts: { date: string; amount: number }[] = [],
+): AccountLine[] {
   return [...closes]
     .sort((a, b) => (a.date < b.date ? -1 : 1))
     .flatMap((row) => {
-      const check = checkClose(row, closes, days, holidays);
+      const check = checkClose(row, closes, days, holidays, payouts);
       if (check.difference == null || check.unfixed == null || check.difference === 0) return [];
       return [{ date: row.date, difference: check.difference, unfixed: check.unfixed }];
     });

@@ -1,5 +1,6 @@
 import { Link, Navigate, useRouterState } from "@tanstack/react-router";
 import {
+  Banknote,
   BarChart3,
   BookOpen,
   Calculator,
@@ -8,6 +9,7 @@ import {
   IndianRupee,
   PenLine,
   NotebookPen,
+  Notebook,
   ArrowLeftRight,
   Download,
   Menu,
@@ -17,6 +19,7 @@ import {
   Wallet,
 } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
+import { useRefresh } from "@/lib/use-refresh";
 import { SettingsDialog } from "@/components/settings-dialog";
 import { PasswordDialog } from "@/components/password-dialog";
 import { BackupDialog } from "@/components/backup-dialog";
@@ -34,8 +37,10 @@ import { useMounted } from "@/lib/use-mounted";
 const NAV = [
   { to: "/", label: "Desk", icon: BookOpen, group: "Today", mobile: true },
   { to: "/counter", label: "Counter", icon: PenLine, group: "Today", mobile: true },
+  { to: "/payments", label: "Payments", icon: Banknote, group: "Today", mobile: true },
   { to: "/closing", label: "Closing", icon: Calculator, group: "Today", mobile: true },
-  { to: "/credit", label: "Credit", icon: ArrowLeftRight, group: "Today", mobile: true },
+  { to: "/credit", label: "Credit and advances", icon: ArrowLeftRight, group: "Today", mobile: true },
+  { to: "/diary", label: "Diary", icon: Notebook, group: "Today", mobile: false },
   { to: "/collections", label: "Collections", icon: IndianRupee, group: "Money", mobile: false },
   { to: "/expenses", label: "Expenses", icon: Receipt, group: "Money", mobile: false },
   { to: "/salary", label: "Salary", icon: Wallet, group: "Money", mobile: false },
@@ -51,7 +56,9 @@ const GROUPS = ["Today", "Money", "People", "Review"] as const;
 const MORE_LABEL: Record<(typeof NAV)[number]["to"], string> = {
   "/": "Desk",
   "/counter": "Live counter",
-  "/credit": "Customer credit",
+  "/payments": "Payments",
+  "/credit": "Credit and advances",
+  "/diary": "Diary",
   "/note": "Month note",
   "/collections": "Collections",
   "/closing": "Daily closing",
@@ -142,14 +149,11 @@ export function Shell({ children }: { children: ReactNode }) {
     };
   }, [mounted, isPending, userId]);
 
-  useEffect(() => {
-    if (role !== "admin") return;
-    void pullSharedCloses();
-    const timer = setInterval(() => {
-      if (pathname !== "/closing") void pullSharedCloses();
-    }, 15000);
-    return () => clearInterval(timer);
-  }, [role, pathname]);
+  useRefresh(() => {
+    if (role !== "admin" && role !== "closer") return;
+    if (pathname === "/closing") return;
+    return pullSharedCloses();
+  }, 20000, [role, pathname]);
 
   if (pathname === "/login") return <>{children}</>;
 
@@ -159,7 +163,7 @@ export function Shell({ children }: { children: ReactNode }) {
 
   if (authEnabled && !user) return <RedirectToSignIn />;
 
-  if (authEnabled && role !== "admin" && role !== "employee") {
+  if (authEnabled && role !== "admin" && role !== "employee" && role !== "closer") {
     return (
       <div className="grid min-h-dvh place-items-center px-6 text-center">
         <div>
@@ -175,18 +179,28 @@ export function Shell({ children }: { children: ReactNode }) {
     );
   }
 
-  if (role === "employee" && pathname !== "/counter" && pathname !== "/credit" && pathname !== "/note") return <Navigate to="/counter" />;
+  if (role === "employee" && pathname !== "/counter" && pathname !== "/credit" && pathname !== "/note" && pathname !== "/payments" && pathname !== "/diary") return <Navigate to="/counter" />;
+  if (role === "closer" && pathname !== "/closing" && pathname !== "/counter") return <Navigate to="/closing" />;
 
-  const links = role === "employee" ? NAV.filter((item) => item.to === "/counter" || item.to === "/credit" || item.to === "/note") : NAV;
+  const links =
+    role === "employee"
+      ? NAV.filter((item) => item.to === "/counter" || item.to === "/payments" || item.to === "/credit" || item.to === "/diary" || item.to === "/note")
+      : role === "closer"
+        ? NAV.filter((item) => item.to === "/counter" || item.to === "/closing")
+        : NAV.filter((item) => item.to !== "/payments");
 
   return (
     <div className="min-h-dvh bg-bg text-ink">
       <aside className="no-print fixed inset-y-0 left-0 z-20 hidden h-dvh w-56 flex-col overflow-hidden border-r border-line bg-surface md:flex">
-        <div className="shrink-0 border-b border-line px-4 pb-4 pt-5 text-center">
-          <img src="/akshaya-logo.png" alt="Akshaya" className="mx-auto h-auto w-16" />
+        <Link
+          to={role === "employee" ? "/counter" : role === "closer" ? "/closing" : "/"}
+          aria-label={role === "employee" ? "Counter" : role === "closer" ? "Closing" : "Desk"}
+          className="block shrink-0 border-b border-line px-4 pb-4 pt-5 text-center"
+        >
+          <img src="/akshaya-logo.png" alt="" className="mx-auto h-auto w-16" />
           <p className="mt-2 font-display text-2xl leading-none text-ink">Thrikkadeeri</p>
           <p className="mt-1 text-xs tracking-wide text-faint">Centre book</p>
-        </div>
+        </Link>
         <nav className="flex min-h-0 flex-1 flex-col overflow-y-auto px-3 py-3">
           {role === "employee" ? (
             links.map((item) => (
@@ -208,7 +222,7 @@ export function Shell({ children }: { children: ReactNode }) {
           )}
         </nav>
         <div className="grid shrink-0 gap-1 border-t border-line bg-surface p-3">
-          {role === "employee" ? (
+          {role === "employee" || role === "closer" ? (
             <Button variant="ghost" className="w-full justify-start" onClick={() => setPasswordOpen(true)}>
               Password
             </Button>
@@ -242,13 +256,13 @@ export function Shell({ children }: { children: ReactNode }) {
 
       <div className="print-shell md:pl-56">
         <header className="no-print sticky top-0 z-20 flex items-center justify-between gap-3 border-b border-line bg-bg/95 px-4 py-3 backdrop-blur md:hidden">
-          <div className="flex min-w-0 items-center gap-2">
+          <Link to={role === "employee" ? "/counter" : role === "closer" ? "/closing" : "/"} aria-label={role === "employee" ? "Counter" : role === "closer" ? "Closing" : "Desk"} className="flex min-w-0 items-center gap-2">
             <img src="/akshaya-logo.png" alt="" className="h-9 w-auto shrink-0" />
             <div className="min-w-0">
               <p className="text-xs font-semibold tracking-widest text-accent">AKSHAYA</p>
               <p className="truncate font-display text-lg leading-none">{shortName(centreName)}</p>
             </div>
-          </div>
+          </Link>
           {role === "admin" ? (
             <div className="flex items-center gap-2">
               <Button variant="secondary" size="sm" onClick={() => setBackup(true)}>
@@ -298,13 +312,14 @@ export function Shell({ children }: { children: ReactNode }) {
       </div>
 
       <nav className="no-print safe-bottom fixed inset-x-0 bottom-0 z-30 border-t border-line bg-surface md:hidden">
-        <div className={cn("grid", role === "employee" ? "grid-cols-3" : "grid-cols-5")}>
-          {(role === "employee" ? links : links.filter((item) => item.mobile)).map((item) => (
+        <div className={cn("grid", role === "closer" ? "grid-cols-2" : "grid-cols-5")}>
+          {(role === "admin" ? links.filter((item) => item.mobile) : links).map((item) => (
             <Link
               key={item.to}
               to={item.to}
               className={cn(
-                "flex min-h-14 flex-col items-center justify-center gap-1 text-xs",
+                "flex flex-col items-center justify-center px-0.5 text-center leading-tight",
+                role === "employee" ? "min-h-16 gap-0.5 text-[11px]" : "min-h-14 gap-1 text-xs",
                 isActive(pathname, item.to) ? "text-accent" : "text-muted",
               )}
             >
