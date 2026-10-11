@@ -657,15 +657,6 @@ export const advanceDesk = createServerFn({ method: "GET" })
     const sql = await getSql();
     await ensureAdvanceTable(sql);
     const date = indiaToday();
-    const repaired = await reopenUnservedAdvances(sql);
-    const released = await releaseAdvanceCharges(sql);
-    if (repaired.length > 0 || released.length > 0) {
-      try {
-        await stampAdvanceHeld(sql, [...repaired, ...released]);
-      } catch {
-        // The waiting list is read below even if the book cannot be rewritten.
-      }
-    }
     const open = await openAdvances(sql, context.userId);
     const paid = role === "admin" ? await paidAdvances(sql) : [];
     const received = await sql<{ total: number }>`
@@ -741,7 +732,7 @@ export const closingAdvance = createServerFn({ method: "GET" })
       if (!lastDate || !usedOn || usedOn > date || usedOn <= lastDate || taken > lastDate) return sum;
       return sum + Number(row.amount);
     }, 0);
-    return { held: heldOf(date), lastDate, lastHeld: last ? heldOf(last.date) : 0, received, used, served, open, paid };
+    return { held: heldOf(date), lastDate, lastHeld: last ? heldOf(last.date) : 0, received, used, served, open, paid, tracked: rows.length > 0 };
   });
 
 export const addAdvance = createServerFn({ method: "POST" })
@@ -1043,21 +1034,6 @@ async function healAdvanceEntries(_sql: Awaited<ReturnType<typeof import("@/lib/
   return [];
 }
 
-// Bring a hidden advance back onto the waiting list once. Do not delete charges.
-async function reopenUnservedAdvances(sql: Awaited<ReturnType<typeof import("@/lib/db").getSql>>): Promise<string[]> {
-  await sql.query(
-    `create table if not exists centre_repair (
-      id text primary key,
-      done_at timestamptz not null default now()
-    )`,
-  );
-  const done = await sql<{ id: string }>`select id from centre_repair where id = 'show-waiting-advances'`;
-  if (done[0]) return [];
-  await sql`update customer_advance set used_on = null where used_on is not null`;
-  await sql`insert into centre_repair (id) values ('show-waiting-advances') on conflict do nothing`;
-  return [];
-}
-
 async function reopenAdvance(sql: Awaited<ReturnType<typeof import("@/lib/db").getSql>>, entryId: string) {
   await ensureAdvanceTable(sql);
   await sql`update customer_advance set used_on = null, used_entry_id = null where used_entry_id = ${entryId}`;
@@ -1076,11 +1052,15 @@ export const listCentrePayouts = createServerFn({ method: "GET" })
     const { getSql } = await import("@/lib/db");
     const sql = await getSql();
     const rows = await readPayouts(sql, context.userId);
+    const bookRow = await sql<{ data: LedgerData | string }>`select data from centre_book where id = 'centre'`;
+    const stored = bookRow[0] ? asJson(bookRow[0].data) : null;
+    const saved = (stored?.payouts ?? []).map((item) => ({ ...item, mine: false }));
+    const list = rows.length > 0 ? rows : saved;
     const closed = await dayIsClosed(sql, date);
     return {
       role,
       closed,
-      rows: role === "employee" ? rows.filter((row) => row.date === date) : rows,
+      rows: role === "employee" ? list.filter((row) => row.date === date) : list,
     };
   });
 
@@ -1341,12 +1321,6 @@ async function readPayouts(
   }));
 }
 
-function withoutPayouts(book: LedgerData): LedgerData {
-  const next = { ...book };
-  delete next.payouts;
-  return next;
-}
-
 export const loadSharedBook = createServerFn({ method: "GET" })
   .middleware([authMiddleware])
   .handler(async ({ context }) => {
@@ -1359,8 +1333,13 @@ export const loadSharedBook = createServerFn({ method: "GET" })
     const row = rows[0];
     if (!row) return null;
     const stored = asJson(row.data);
+    const savedPayouts = stored.payouts ?? [];
     delete stored.payouts;
-    const payouts = role === "employee" ? [] : (await readPayouts(sql, context.userId)).map(({ mine: _mine, ...item }) => item);
+    const fromTable = role === "employee" ? [] : (await readPayouts(sql, context.userId)).map(({ mine: _mine, ...item }) => item);
+    if (role === "admin" && fromTable.length === 0 && savedPayouts.length > 0) {
+      await replacePayouts(sql, savedPayouts, context.userId);
+    }
+    const payouts = role === "employee" ? [] : fromTable.length > 0 ? fromTable : savedPayouts;
     const storedBook = role === "admin" ? stored : role === "closer" ? closerView(stored) : staffView(stored);
     const book = { ...storedBook, payouts: role === "employee" ? [] : payouts };
     return { book, touches: role === "employee" ? {} : (asJson(row.touches) ?? {}) } satisfies SharedBook;
@@ -1779,7 +1758,7 @@ export const saveSharedBook = createServerFn({ method: "POST" })
     const now = new Date().toISOString();
     const touches = { ...merged.touches };
     for (const date of synced.dates) touches[`day:${date}`] = now;
-    await writeBook(sql, withoutPayouts(synced.book), touches);
+    await writeBook(sql, synced.book, touches);
     await ensureAdvanceTable(sql);
     await stampAdvanceHeld(sql);
     const fresh = await sql<{ data: LedgerData | string; touches: Record<string, string> | string }>`
@@ -1885,7 +1864,8 @@ export const exportCentreArchive = createServerFn({ method: "GET" })
     const rows = await sql<{ data: LedgerData | string }>`select data from centre_book where id = 'centre'`;
     const stored = rows[0] ? asJson(rows[0].data) : null;
     if (!stored?.centreName) throw new Error("The centre book is not there.");
-    const payouts = (await readPayouts(sql, context.userId)).map(({ mine: _mine, ...item }) => item);
+    const fromTable = (await readPayouts(sql, context.userId)).map(({ mine: _mine, ...item }) => item);
+    const payouts = fromTable.length > 0 ? fromTable : (stored.payouts ?? []);
     const records = await readArchiveRecords(sql);
     return {
       kind: "akshaya-thrikkadeeri-book" as const,
@@ -1920,7 +1900,7 @@ export const importCentreArchive = createServerFn({ method: "POST" })
       for (const close of synced.book.cashCloses ?? []) touches[close.date] = now;
       for (const day of synced.book.days ?? []) touches[`day:${day.date}`] = now;
       const payouts = synced.book.payouts ?? [];
-      await writeBook(sql, withoutPayouts(synced.book), touches);
+      await writeBook(sql, synced.book, touches);
       return { ...synced.book, payouts };
     });
     return { book: saved, touches: {} } satisfies SharedBook;
@@ -1970,7 +1950,7 @@ export const restoreBackup = createServerFn({ method: "POST" })
       for (const close of synced.book.cashCloses ?? []) touches[close.date] = now;
       for (const day of synced.book.days ?? []) touches[`day:${day.date}`] = now;
       const payouts = synced.book.payouts ?? [];
-      await writeBook(sql, withoutPayouts(synced.book), touches);
+      await writeBook(sql, synced.book, touches);
       return { ...synced.book, payouts };
     });
     return { book: saved, touches: {} } satisfies SharedBook;

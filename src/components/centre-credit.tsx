@@ -1,9 +1,12 @@
-export function CentreCredit() {
-  return (
-    <footer className="no-print mx-auto mt-12 max-w-xs text-center text-xs leading-relaxed text-faint">
-      <p>Developed by Jaifer Ali M</p>
-      <p>Akshaya Centre Thrikkadeeri · 9995080431</p>
-      <p className="mt-2">For this centre only. Do not copy or use it without permission.</p>
-    </footer>
-  );
+export function CentreCredit({ place = "page" }: { place?: "page" | "side" }) {
+  if (place === "side") {
+    return (
+      <p className="no-print px-4 pb-4 text-[10px] leading-snug text-faint">
+        Jaifer Ali M
+        <br />
+        9995080431
+      </p>
+    );
+  }
+  return <p className="no-print mt-8 text-center text-[11px] text-faint">Jaifer Ali M · 9995080431</p>;
 }

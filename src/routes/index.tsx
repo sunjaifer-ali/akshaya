@@ -188,13 +188,19 @@ function DeskPage() {
         </div>
       </section>
 
-      <section className="mt-4 grid gap-3 sm:grid-cols-2">
+      <section className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Link to="/closing" search={{ d: today || `${month}-01` }} className="rounded-xl border border-line bg-surface p-5 hover:border-line-strong">
-          <p className="font-medium">Closing</p>
+          <CardText title="Closing" value={mounted ? closeWord.value : "—"} note="Cash, wallets and bank" />
         </Link>
-        <Jump to="/expenses" title="Expenses" text={snap.expense > 0 ? inr(snap.expense) : "—"} />
-        <Jump to="/centre" title="Centre month" text={snap.collection > 0 ? inr(snap.collection) : "—"} />
-        <Jump to="/reports" title="Reports" text="" />
+        <Link to="/expenses" search={{ m: month }} className="rounded-xl border border-line bg-surface p-5 hover:border-line-strong">
+          <CardText title="Expenses" value={snap.expense > 0 ? inr(snap.expense) : "—"} note="Bills for this month" />
+        </Link>
+        <Link to="/centre" className="rounded-xl border border-line bg-surface p-5 hover:border-line-strong">
+          <CardText title="Centre month" value={snap.collection > 0 ? inr(snap.collection) : "—"} note="Collection and margin" />
+        </Link>
+        <Link to="/reports" className="rounded-xl border border-line bg-surface p-5 hover:border-line-strong">
+          <CardText title="Reports" value={inr(snap.margin)} note="Each month and each person" />
+        </Link>
       </section>
     </div>
   );
@@ -398,12 +404,13 @@ function Stat({
   );
 }
 
-function Jump({ to, title, text }: { to: "/expenses" | "/centre" | "/reports"; title: string; text: string }) {
+function CardText({ title, value, note }: { title: string; value: string; note: string }) {
   return (
-    <Link to={to} className="rounded-xl border border-line bg-surface p-5 hover:border-line-strong">
-      <p className="font-medium">{title}</p>
-      {text ? <p className="mt-1 font-display text-2xl tabular-nums">{text}</p> : null}
-    </Link>
+    <>
+      <p className="text-xs font-semibold tracking-widest text-faint">{title.toUpperCase()}</p>
+      <p className="mt-2 font-display text-3xl tabular-nums">{value}</p>
+      <p className="mt-2 text-sm text-muted">{note}</p>
+    </>
   );
 }
 

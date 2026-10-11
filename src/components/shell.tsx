@@ -252,6 +252,7 @@ export function Shell({ children }: { children: ReactNode }) {
             {signingOut ? "Signing out…" : "Sign out"}
           </Button>
         </div>
+        <CentreCredit place="side" />
       </aside>
 
       <div className="print-shell md:pl-56">
@@ -307,7 +308,6 @@ export function Shell({ children }: { children: ReactNode }) {
             </div>
           ) : null}
           {children}
-          <CentreCredit />
         </main>
       </div>
 

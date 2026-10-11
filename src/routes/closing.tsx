@@ -56,7 +56,7 @@ function ClosingPage() {
   const [result, setResult] = useState<Result | null>(null);
   const [confirmClear, setConfirmClear] = useState(false);
   const [liveCredit, setLiveCredit] = useState<{ given: CreditGiven[]; paid: CreditPayment[]; unpaid: number } | null>(null);
-  const [liveAdvance, setLiveAdvance] = useState<{ held: number; lastDate: string; lastHeld: number; received: number; used: number; served: number; open: AdvanceLine[]; paid: AdvanceLine[] } | null>(null);
+  const [liveAdvance, setLiveAdvance] = useState<{ held: number; lastDate: string; lastHeld: number; received: number; used: number; served: number; open: AdvanceLine[]; paid: AdvanceLine[]; tracked?: boolean } | null>(null);
   const [advanceEdit, setAdvanceEdit] = useState<{ id: string; customer: string; mobile: string; service: string; amount: string } | null>(null);
   const [advancePending, setAdvancePending] = useState(false);
   const [payouts, setPayouts] = useState<CentrePayout[]>([]);
@@ -109,12 +109,13 @@ function ClosingPage() {
 
   const base = editing ? draft : (saved ?? draft);
   const separate = Boolean(saved?.creditSeparate) || !saved || Boolean(today && date >= today);
+  const useLiveAdvance = Boolean(liveAdvance?.tracked);
   const row = {
     ...base,
     creditSeparate: separate,
     ...(liveCredit ? { creditGiven: liveCredit.given, creditPaid: liveCredit.paid, credits: liveCredit.unpaid } : {}),
-    advanceHeld: liveAdvance?.held ?? base.advanceHeld ?? 0,
-    advanceServed: liveAdvance?.served ?? base.advanceServed ?? 0,
+    advanceHeld: useLiveAdvance ? liveAdvance!.held : (base.advanceHeld ?? 0),
+    advanceServed: useLiveAdvance ? liveAdvance!.served : (base.advanceServed ?? 0),
   };
   const closing = moneyInHand(row);
   const cash = cashInHand(row.notes);
@@ -123,7 +124,7 @@ function ClosingPage() {
   const counted = countStarted(row);
   const tallyReady = counted;
   const previewCloses = (tallyReady ? [...book.cashCloses.filter((item) => item.date !== date), row] : book.cashCloses).map((item) => {
-    if (!liveAdvance) return item;
+    if (!useLiveAdvance || !liveAdvance) return item;
     if (item.date === date) return { ...item, advanceHeld: liveAdvance.held, advanceServed: liveAdvance.served };
     if (liveAdvance.lastDate && item.date === liveAdvance.lastDate) return { ...item, advanceHeld: liveAdvance.lastHeld };
     return item;
@@ -131,7 +132,7 @@ function ClosingPage() {
   const check = checkClose(row, previewCloses, book.days, book.holidays, payouts);
   const lined = book.cashCloses.map((item) => {
     if (item.date === date) return { ...item, creditSeparate: separate, profitTaken: row.profitTaken, profitNote: row.profitNote, advanceHeld: row.advanceHeld, advanceServed: row.advanceServed };
-    if (liveAdvance?.lastDate && item.date === liveAdvance.lastDate) return { ...item, advanceHeld: liveAdvance.lastHeld };
+    if (liveAdvance?.tracked && liveAdvance.lastDate && item.date === liveAdvance.lastDate) return { ...item, advanceHeld: liveAdvance.lastHeld };
     return item;
   });
   const lines = accountLines(lined, book.days, book.holidays, payouts);

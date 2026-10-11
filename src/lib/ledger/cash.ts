@@ -210,13 +210,6 @@ export function checkClose(
   const creditPaid = spanRows.reduce((sum, item) => sum + creditPaidTotal(item), 0);
   let raw = movement - (known - personalGpay) - gap.advanceChange + gap.profitTaken + paidOut + bankDepartment - creditPaid;
   let difference = raw < 0 ? Math.min(0, raw + creditGiven) : raw;
-  const alreadyOpen = Math.max(0, (row.credits || 0) - creditGiven);
-  if (difference > 0 && alreadyOpen > 0) {
-    const keep = Math.min(difference, alreadyOpen);
-    previous += keep;
-    movement -= keep;
-    difference -= keep;
-  }
   if (difference > 0 && creditGiven > 0) difference = Math.max(0, difference - creditGiven);
   return {
     last: previous,
