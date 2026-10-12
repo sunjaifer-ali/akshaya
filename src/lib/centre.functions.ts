@@ -749,9 +749,8 @@ export const closingAdvance = createServerFn({ method: "GET" })
       return sum + Number(row.amount);
     }, 0);
     const served = rows.reduce((sum, row) => {
-      const taken = String(row.taken_on).slice(0, 10);
       const usedOn = row.used_on ? String(row.used_on).slice(0, 10) : "";
-      if (!lastDate || !usedOn || usedOn > date || usedOn <= lastDate || taken > lastDate) return sum;
+      if (!lastDate || !usedOn || usedOn > date || usedOn <= lastDate) return sum;
       return sum + Number(row.amount);
     }, 0);
     return { held: heldOf(date), lastDate, lastHeld: last ? heldOf(last.date) : 0, received, used, served, taken, open, paid, tracked: rows.length > 0 };
@@ -1042,9 +1041,8 @@ function servedSince(
 ) {
   if (!previous) return 0;
   return advances.reduce((sum, item) => {
-    const taken = String(item.taken_on).slice(0, 10);
     const used = item.used_on ? String(item.used_on).slice(0, 10) : "";
-    if (!used || used > closeDate || used <= previous || taken > previous) return sum;
+    if (!used || used > closeDate || used <= previous) return sum;
     return sum + Number(item.amount);
   }, 0);
 }

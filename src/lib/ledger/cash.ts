@@ -162,6 +162,7 @@ export type CloseCheck = {
   advanceHeld: number;
   advanceChange: number;
   advanceServed: number;
+  advanceIn: number;
   profitTaken: number;
   paidOut: number;
   missing: string[];
@@ -188,7 +189,7 @@ export function checkClose(
   const last = previousClose(closes, row.date);
   const gap = closeGap(row, last);
   if (!last) {
-    return { last: null, lastDate: "", movement: null, collected: null, personalGpay: 0, departmentGpay: 0, bankDepartment: 0, paidOut: 0, ...gap, advanceChange: 0, advanceServed: 0, missing: [], difference: null, unfixed: null };
+    return { last: null, lastDate: "", movement: null, collected: null, personalGpay: 0, departmentGpay: 0, bankDepartment: 0, paidOut: 0, ...gap, advanceChange: 0, advanceServed: 0, advanceIn: 0, missing: [], difference: null, unfixed: null };
   }
   const span = spanDates(last.date, row.date);
   const paidOut = payouts.reduce((sum, item) => (span.includes(item.date) ? sum + (item.amount || 0) : sum), 0);
@@ -200,10 +201,10 @@ export function checkClose(
   let previous = closeBase(last);
   let movement = closeBase(row) - previous;
   if (!countStarted(row) && !row.accepted) {
-    return { last: closeBase(last), lastDate: last.date, movement: null, collected: missing.length > 0 ? null : known, personalGpay, departmentGpay, bankDepartment, paidOut, ...gap, missing, difference: null, unfixed: null };
+    return { last: closeBase(last), lastDate: last.date, movement: null, collected: missing.length > 0 ? null : known, personalGpay, departmentGpay, bankDepartment, paidOut, ...gap, missing, difference: null, unfixed: null, advanceIn: 0 };
   }
   if (missing.length > 0) {
-    return { last: closeBase(last), lastDate: last.date, movement, collected: null, personalGpay, departmentGpay, bankDepartment, paidOut, ...gap, missing, difference: null, unfixed: null };
+    return { last: closeBase(last), lastDate: last.date, movement, collected: null, personalGpay, departmentGpay, bankDepartment, paidOut, ...gap, missing, difference: null, unfixed: null, advanceIn: 0 };
   }
   const spanRows = [...closes.filter((item) => span.includes(item.date) && item.date !== row.date), row];
   const creditGiven = spanRows.reduce((sum, item) => sum + creditGivenTotal(item), 0);
@@ -220,8 +221,10 @@ export function checkClose(
   const departmentOut = Math.max(bankDepartment, departmentGpay);
   const advanceIn =
     typeof row.advanceIn === "number" ? Math.max(0, row.advanceIn) : Math.max(0, gap.advanceChange + (row.advanceServed ?? 0));
+  // Advance received is cash that came in. Serving an advance pays that bill from our bank, so the drop is not a shortage.
+  const advanceOut = row.advanceServed ?? 0;
   const difference =
-    movement - serviceInCentre + departmentOut + creditGiven - creditPaid - advanceIn + gap.profitTaken + paidOut;
+    movement - serviceInCentre + departmentOut + creditGiven - creditPaid - advanceIn + advanceOut + gap.profitTaken + paidOut;
   return {
     last: previous,
     lastDate: last.date,
@@ -232,6 +235,7 @@ export function checkClose(
     bankDepartment,
     paidOut,
     ...gap,
+    advanceIn,
     missing: [],
     difference,
     unfixed: unfixedAmount(difference, row.fixed),

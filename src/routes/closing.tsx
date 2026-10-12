@@ -531,7 +531,8 @@ function CheckCard({
         {check.departmentGpay > 0 ? <Pair label="Department fee on that GPay" value={inr(check.departmentGpay)} /> : null}
         {check.bankDepartment > 0 ? <Pair label="Department paid from our bank" value={inr(check.bankDepartment)} /> : null}
         {check.advanceHeld > 0 || check.advanceChange !== 0 ? <Pair label="Advance still held" value={inr(check.advanceHeld)} /> : null}
-        {check.advanceServed > 0 ? <Pair label="Advance served" value={inr(check.advanceServed)} /> : null}
+        {check.advanceIn > 0 ? <Pair label="Advance received" value={inr(check.advanceIn)} /> : null}
+        {check.advanceServed > 0 ? <Pair label="Paid from advance" value={inr(check.advanceServed)} /> : null}
         {check.advanceChange !== 0 ? <Pair label="Advance since last closing" value={signedInr(check.advanceChange)} /> : null}
         {check.profitTaken > 0 ? <Pair label="Transferred from the bank" value={inr(check.profitTaken)} /> : null}
         {check.paidOut > 0 ? <Pair label="Paid out" value={inr(check.paidOut)} /> : null}
