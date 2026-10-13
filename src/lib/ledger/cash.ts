@@ -165,6 +165,8 @@ export type CloseCheck = {
   advanceIn: number;
   profitTaken: number;
   paidOut: number;
+  receipts: number;
+  payments: number;
   missing: string[];
   difference: number | null;
   unfixed: number | null;
@@ -189,7 +191,7 @@ export function checkClose(
   const last = previousClose(closes, row.date);
   const gap = closeGap(row, last);
   if (!last) {
-    return { last: null, lastDate: "", movement: null, collected: null, personalGpay: 0, departmentGpay: 0, bankDepartment: 0, paidOut: 0, ...gap, advanceChange: 0, advanceServed: 0, advanceIn: 0, missing: [], difference: null, unfixed: null };
+    return { last: null, lastDate: "", movement: null, collected: null, personalGpay: 0, departmentGpay: 0, bankDepartment: 0, paidOut: 0, receipts: 0, payments: 0, ...gap, advanceChange: 0, advanceServed: 0, advanceIn: 0, missing: [], difference: null, unfixed: null };
   }
   const span = spanDates(last.date, row.date);
   const paidOut = payouts.reduce((sum, item) => (span.includes(item.date) ? sum + (item.amount || 0) : sum), 0);
@@ -201,30 +203,22 @@ export function checkClose(
   let previous = closeBase(last);
   let movement = closeBase(row) - previous;
   if (!countStarted(row) && !row.accepted) {
-    return { last: closeBase(last), lastDate: last.date, movement: null, collected: missing.length > 0 ? null : known, personalGpay, departmentGpay, bankDepartment, paidOut, ...gap, missing, difference: null, unfixed: null, advanceIn: 0 };
+    return { last: closeBase(last), lastDate: last.date, movement: null, collected: missing.length > 0 ? null : known, personalGpay, departmentGpay, bankDepartment, paidOut, receipts: 0, payments: 0, ...gap, missing, difference: null, unfixed: null, advanceIn: 0 };
   }
   if (missing.length > 0) {
-    return { last: closeBase(last), lastDate: last.date, movement, collected: null, personalGpay, departmentGpay, bankDepartment, paidOut, ...gap, missing, difference: null, unfixed: null, advanceIn: 0 };
+    return { last: closeBase(last), lastDate: last.date, movement, collected: null, personalGpay, departmentGpay, bankDepartment, paidOut, receipts: 0, payments: 0, ...gap, missing, difference: null, unfixed: null, advanceIn: 0 };
   }
   const spanRows = [...closes.filter((item) => span.includes(item.date) && item.date !== row.date), row];
-  const creditGiven = spanRows.reduce((sum, item) => sum + creditGivenTotal(item), 0);
   const creditPaid = spanRows.reduce((sum, item) => sum + creditPaidTotal(item), 0);
   const creditOnCounter = span.reduce((sum, date) => sum + (days.find((item) => item.date === date)?.creditService ?? 0), 0);
-  // A credit is one whole bill. The customer did not pay, so that bill is not cash in the centre.
-  // Take it out of the counter, then add the whole bill once. The closing total that balances drops by the full credit.
-  const room = Math.max(0, known - personalGpay);
-  // Name-matched service charge of a credit is not cash. If the only counter amount is the credit itself, that is not cash either.
-  // The whole credit is added once below, so the two no longer cancel and the excess no longer ignores the bill.
-  const matched = Math.min(Math.max(creditOnCounter, 0), room);
-  const sameBill = matched === 0 && creditGiven > 0 && room === creditGiven ? creditGiven : matched;
-  const serviceInCentre = room - sameBill;
-  const departmentOut = Math.max(bankDepartment, departmentGpay);
+  // Difference = (today centre balance − last centre balance) − receipts + payments.
+  // A service, an old advance, or a credit is not cash. Only money that entered or left the centre counts.
+  const centreService = Math.max(0, known - personalGpay - Math.max(creditOnCounter, 0));
   const advanceIn =
     typeof row.advanceIn === "number" ? Math.max(0, row.advanceIn) : Math.max(0, gap.advanceChange + (row.advanceServed ?? 0));
-  // Advance received is cash that came in. Serving an advance pays that bill from our bank, so the drop is not a shortage.
-  const advanceOut = row.advanceServed ?? 0;
-  const difference =
-    movement - serviceInCentre + departmentOut + creditGiven - creditPaid - advanceIn + advanceOut + gap.profitTaken + paidOut;
+  const receipts = centreService + creditPaid + advanceIn;
+  const payments = bankDepartment + paidOut + (row.profitTaken ?? 0);
+  const difference = movement - receipts + payments;
   return {
     last: previous,
     lastDate: last.date,
@@ -234,6 +228,8 @@ export function checkClose(
     departmentGpay,
     bankDepartment,
     paidOut,
+    receipts,
+    payments,
     ...gap,
     advanceIn,
     missing: [],

@@ -526,18 +526,17 @@ function CheckCard({
       <dl className="mt-3 grid gap-2 text-base">
         <Pair label={`Last closing, ${formatDay(check.lastDate)}`} value={inr(check.last)} />
         <Pair label="Movement" value={signedInr(check.movement)} />
-        <Pair label="Counter collection" value={check.collected == null ? "—" : inr(check.collected)} />
-        {check.personalGpay > 0 ? <Pair label="Service charge on personal GPay" value={inr(check.personalGpay)} /> : null}
-        {check.departmentGpay > 0 ? <Pair label="Department fee on that GPay" value={inr(check.departmentGpay)} /> : null}
+        <Pair label="Receipts into the centre" value={inr(check.receipts)} />
+        <Pair label="Service charge kept in the centre" value={inr(Math.max(0, check.receipts - check.advanceIn - paid))} />
+        {check.advanceIn > 0 ? <Pair label="Advance received into the centre" value={inr(check.advanceIn)} /> : null}
+        {paid > 0 ? <Pair label="Credit repaid into the centre" value={inr(paid)} /> : null}
+        <Pair label="Payments out of the centre" value={inr(check.payments)} />
         {check.bankDepartment > 0 ? <Pair label="Department paid from our bank" value={inr(check.bankDepartment)} /> : null}
-        {check.advanceHeld > 0 || check.advanceChange !== 0 ? <Pair label="Advance still held" value={inr(check.advanceHeld)} /> : null}
-        {check.advanceIn > 0 ? <Pair label="Advance received" value={inr(check.advanceIn)} /> : null}
-        {check.advanceServed > 0 ? <Pair label="Paid from advance" value={inr(check.advanceServed)} /> : null}
-        {check.advanceChange !== 0 ? <Pair label="Advance since last closing" value={signedInr(check.advanceChange)} /> : null}
-        {check.profitTaken > 0 ? <Pair label="Transferred from the bank" value={inr(check.profitTaken)} /> : null}
-        {check.paidOut > 0 ? <Pair label="Paid out" value={inr(check.paidOut)} /> : null}
-        {given > 0 ? <Pair label="Credit given, added" value={inr(given)} /> : null}
-        {paid > 0 ? <Pair label="Credit received, taken out" value={inr(paid)} /> : null}
+        {check.paidOut > 0 ? <Pair label="Expenses paid from the centre" value={inr(check.paidOut)} /> : null}
+        {check.profitTaken > 0 ? <Pair label="Transfer to personal account" value={inr(check.profitTaken)} /> : null}
+        {check.personalGpay > 0 ? <Pair label="Personal GPay, not counted" value={inr(check.personalGpay + check.departmentGpay)} /> : null}
+        {check.advanceServed > 0 ? <Pair label="Advance served, not counted" value={inr(check.advanceServed)} /> : null}
+        {given > 0 ? <Pair label="Credit given, not counted" value={inr(given)} /> : null}
       </dl>
       {hold ? null : shown.missing.length > 0 ? (
         <p className="mt-3 text-sm text-muted">
