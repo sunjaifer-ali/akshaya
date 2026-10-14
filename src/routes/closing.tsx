@@ -159,7 +159,7 @@ function ClosingPage() {
   };
 
   return (
-    <div className="report-sheet">
+    <div className="report-sheet mx-auto max-w-xl">
       <PageHeader
         kicker="CLOSING"
         title="Daily closing"
@@ -191,18 +191,18 @@ function ClosingPage() {
         {accepted ? " · Accepted" : ""}
       </p>
 
-      <section className="rounded-xl border border-line bg-surface p-5">
-        <h2 className="font-medium">Notes</h2>
-        <ul className="mt-2 divide-y divide-line">
+      <section className="mx-auto max-w-lg rounded-xl border border-line bg-surface p-4">
+        <h2 className="text-center font-medium">Notes</h2>
+        <div className="mt-3 grid grid-flow-col grid-rows-3 gap-x-4 gap-y-2">
           {NOTE_ROWS.map((note) => {
             const count = row.notes[note.key];
             return (
-              <li key={note.key} className="flex items-center gap-3 py-2">
-                <span className="w-14 text-sm font-medium">{note.face}×</span>
+              <label key={note.key} className="flex items-center gap-2">
+                <span className="w-9 shrink-0 text-sm font-medium">{note.face}×</span>
                 <input
                   aria-label={`${note.face} rupee notes`}
                   inputMode="numeric"
-                  className="h-11 w-24 rounded-sm border border-line bg-bg px-3 text-base tabular-nums outline-none focus:border-accent"
+                  className="h-10 w-14 rounded-sm border border-line bg-bg px-2 text-base tabular-nums outline-none focus:border-accent"
                   value={count ? String(count) : ""}
                   placeholder="0"
                   readOnly={!editing}
@@ -212,18 +212,19 @@ function ClosingPage() {
                   }}
                 />
                 <span className="ml-auto text-sm tabular-nums text-muted">{inr(note.face * count)}</span>
-              </li>
+              </label>
             );
           })}
-        </ul>
-        <p className="mt-3 flex justify-between text-sm">
+        </div>
+        <p className="mt-3 flex justify-between border-t border-line pt-3 text-sm">
           <span className="text-muted">Cash in hand</span>
           <span className="font-medium tabular-nums">{inr(cash)}</span>
         </p>
       </section>
 
-      <section className="mt-4 grid gap-3 rounded-xl border border-line bg-surface p-5 sm:grid-cols-2">
-        <h2 className="font-medium sm:col-span-2">Other balances</h2>
+      <section className="mx-auto mt-3 max-w-lg rounded-xl border border-line bg-surface p-4">
+        <h2 className="text-center font-medium">Other balances</h2>
+        <div className="mt-3 grid gap-3 sm:grid-cols-2">
         <Field label="E-district wallet">
           <MoneyField label="E-district wallet" value={row.eDistrict} disabled={!editing} onChange={(amount) => patch({ eDistrict: amount ?? 0 })} />
         </Field>
@@ -233,6 +234,7 @@ function ClosingPage() {
         <Field label="Bank balance">
           <MoneyField label="Bank balance" value={row.bank} disabled={!editing} onChange={(amount) => patch({ bank: amount ?? 0 })} />
         </Field>
+        </div>
       </section>
 
       <PaidOut
@@ -251,7 +253,7 @@ function ClosingPage() {
       />
 
       {role === "admin" ? (
-        <section className="mt-4 rounded-xl border border-line bg-surface p-5">
+        <section className="mx-auto mt-3 max-w-lg rounded-xl border border-line bg-surface p-4">
           <h2 className="font-medium">Transfer to self or other accounts</h2>
           <div className="mt-3 grid gap-3 sm:grid-cols-2">
             <Field label="Amount transferred">
@@ -273,68 +275,63 @@ function ClosingPage() {
       ) : null}
 
       {(role === "admin" || role === "closer") && liveAdvance && (liveAdvance.open.length > 0 || liveAdvance.paid.length > 0) ? (
-        <section className="mt-4 rounded-xl border border-line bg-surface p-5">
-          <h2 className="font-medium">Advance still to serve</h2>
-          {liveAdvance.received > 0 || liveAdvance.used > 0 ? (
-            <p className="mt-1 text-sm text-muted">
-              {liveAdvance.received > 0 ? `Received today ${inr(liveAdvance.received)}` : ""}
-              {liveAdvance.received > 0 && liveAdvance.used > 0 ? " · " : ""}
-              {liveAdvance.used > 0 ? `Service given ${inr(liveAdvance.used)}` : ""}
-            </p>
-          ) : null}
-          <ul className="mt-2 divide-y divide-line">
-            {liveAdvance.open.map((line) => (
-              <li key={line.id} className="py-2 text-sm">
-                <div className="flex items-center justify-between gap-3">
-                  <span>
-                    {line.customer}
-                    <span className="mt-0.5 block text-xs text-faint">{line.service} · {line.staff}</span>
-                  </span>
-                  <span className="flex items-center gap-3">
-                    <span className="tabular-nums">{inr(line.amount)}</span>
-                    {role === "admin" ? (
-                      <Button size="sm" variant="secondary" className="no-print" disabled={advancePending} onClick={() => setAdvanceEdit({ id: line.id, customer: line.customer, mobile: line.mobile, service: line.service, amount: String(line.amount) })}>
-                        Edit
-                      </Button>
-                    ) : null}
-                  </span>
-                </div>
-                {role === "admin" && advanceEdit?.id === line.id ? (
-                  <AdvanceEditFields edit={advanceEdit} pending={advancePending} onChange={setAdvanceEdit} onCancel={() => setAdvanceEdit(null)} onSave={() => saveClosingAdvance(advanceEdit, date, setAdvancePending, setAdvanceEdit, setLiveAdvance, setResult)} />
-                ) : null}
-              </li>
-            ))}
-          </ul>
-          {role === "admin" && liveAdvance.paid.length > 0 ? (
-            <>
-              <h3 className="mt-4 font-medium">Service given</h3>
+        <section className="mx-auto mt-3 max-w-lg rounded-xl border border-line bg-surface p-4">
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div>
+              <h2 className="text-sm font-medium">Advance to serve</h2>
+              {liveAdvance.received > 0 ? <p className="mt-1 text-xs tabular-nums text-muted">Received {inr(liveAdvance.received)}</p> : null}
               <ul className="mt-2 divide-y divide-line">
-                {liveAdvance.paid.map((line) => (
-                  <li key={line.id} className="py-2 text-sm">
-                    <div className="flex items-center justify-between gap-3">
-                      <span>
-                        {line.customer}
-                        <span className="mt-0.5 block text-xs text-faint">{line.service} · {line.staff}</span>
-                      </span>
-                      <span className="flex items-center gap-3">
+                {liveAdvance.open.map((line) => (
+                  <li key={line.id} className="py-1.5 text-sm">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="min-w-0 truncate">{line.customer}</span>
+                      <span className="flex shrink-0 items-center gap-2">
                         <span className="tabular-nums">{inr(line.amount)}</span>
-                        <Button size="sm" variant="secondary" className="no-print" disabled={advancePending} onClick={() => setAdvanceEdit({ id: line.id, customer: line.customer, mobile: line.mobile, service: line.service, amount: String(line.amount) })}>
-                          Edit
-                        </Button>
+                        {role === "admin" ? (
+                          <Button size="sm" variant="secondary" className="no-print" disabled={advancePending} onClick={() => setAdvanceEdit({ id: line.id, customer: line.customer, mobile: line.mobile, service: line.service, amount: String(line.amount) })}>
+                            Edit
+                          </Button>
+                        ) : null}
                       </span>
                     </div>
-                    {advanceEdit?.id === line.id ? (
+                    {role === "admin" && advanceEdit?.id === line.id ? (
                       <AdvanceEditFields edit={advanceEdit} pending={advancePending} onChange={setAdvanceEdit} onCancel={() => setAdvanceEdit(null)} onSave={() => saveClosingAdvance(advanceEdit, date, setAdvancePending, setAdvanceEdit, setLiveAdvance, setResult)} />
                     ) : null}
                   </li>
                 ))}
               </ul>
-            </>
-          ) : null}
+              {liveAdvance.open.length === 0 ? <p className="mt-2 text-sm text-muted">None</p> : null}
+            </div>
+            <div>
+              <h2 className="text-sm font-medium">Service given</h2>
+              {liveAdvance.used > 0 ? <p className="mt-1 text-xs tabular-nums text-muted">Given {inr(liveAdvance.used)}</p> : null}
+              <ul className="mt-2 divide-y divide-line">
+                {liveAdvance.paid.map((line) => (
+                  <li key={line.id} className="py-1.5 text-sm">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="min-w-0 truncate">{line.customer}</span>
+                      <span className="flex shrink-0 items-center gap-2">
+                        <span className="tabular-nums">{inr(line.amount)}</span>
+                        {role === "admin" ? (
+                          <Button size="sm" variant="secondary" className="no-print" disabled={advancePending} onClick={() => setAdvanceEdit({ id: line.id, customer: line.customer, mobile: line.mobile, service: line.service, amount: String(line.amount) })}>
+                            Edit
+                          </Button>
+                        ) : null}
+                      </span>
+                    </div>
+                    {role === "admin" && advanceEdit?.id === line.id ? (
+                      <AdvanceEditFields edit={advanceEdit} pending={advancePending} onChange={setAdvanceEdit} onCancel={() => setAdvanceEdit(null)} onSave={() => saveClosingAdvance(advanceEdit, date, setAdvancePending, setAdvanceEdit, setLiveAdvance, setResult)} />
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
+              {liveAdvance.paid.length === 0 ? <p className="mt-2 text-sm text-muted">None</p> : null}
+            </div>
+          </div>
         </section>
       ) : null}
 
-      <section className="mt-4 rounded-xl border border-line bg-surface p-4">
+      <section className="mx-auto mt-3 max-w-lg rounded-xl border border-line bg-surface p-4">
         <div className="flex flex-wrap items-baseline justify-between gap-3">
           <h2 className="font-medium">Credit</h2>
           <div className="flex items-center gap-3">
@@ -371,7 +368,7 @@ function ClosingPage() {
         ) : null}
       </section>
 
-      <section className="mt-4 rounded-xl border border-line bg-surface p-5">
+      <section className="mx-auto mt-3 max-w-lg rounded-xl border border-line bg-surface p-4 text-center">
         <h2 className="font-medium">Total closing</h2>
         <p className="mt-1 font-display text-3xl tabular-nums">{inr(closing)}</p>
         <ClosingParts cash={cash} wallets={row.eDistrict + row.csc} bank={row.bank} />
@@ -380,7 +377,7 @@ function ClosingPage() {
       <CheckCard date={date} check={check} fixed={row.fixed} paid={paid} given={givenTotal} locked={!editing} hold={!tallyReady} onFixed={(fixed) => patch({ fixed })} />
 
       {shorts.length + excesses.length > 0 ? (
-        <details className="short-report mt-4 rounded-xl border border-line bg-surface p-4">
+        <details className="short-report mx-auto mt-3 max-w-lg rounded-xl border border-line bg-surface p-4">
           <summary className="cursor-pointer text-sm font-medium">Open days</summary>
           <div className="mt-3 grid gap-4 sm:grid-cols-2">
             <AccountList title="Short" lines={shorts} onOpen={go} />
@@ -388,6 +385,94 @@ function ClosingPage() {
           </div>
         </details>
       ) : null}
+
+      <section className="mx-auto mt-3 grid max-w-lg gap-3 sm:grid-cols-2">
+        <AccountTile label="Short" count={shorts.length} total={shortTotal} tone="bad" />
+        <AccountTile label="Excess" count={excesses.length} total={excessTotal} tone="warn" />
+      </section>
+
+      <div className="no-print mx-auto mt-3 flex max-w-lg flex-wrap justify-center gap-2 rounded-xl border border-line bg-surface p-3">
+        {locked ? (
+          <p className="text-sm text-muted">Accepted. Only the admin can change this closing.</p>
+        ) : editing ? (
+          <Button
+            onClick={() => {
+              const closer = user?.displayName?.trim() || "Admin";
+              const next = { ...row, date, countedBy: closer, accepted: role === "admin" ? Boolean(saved?.accepted) : false };
+              book.setCashClose(next);
+              setEditing(false);
+              setResult({ ok: true, message: `Closing for ${formatDay(date)} successfully saved.` });
+              void pushClose(date, next).catch((error: unknown) => {
+                setResult({ ok: false, message: error instanceof Error ? error.message : "Saved on this browser, but not shared." });
+              });
+            }}
+          >
+            Save
+          </Button>
+        ) : (
+          <Button
+            onClick={() => {
+              setDraft(saved ?? blank(date, 0, counterName(book.employees, user?.displayName)));
+              setEditing(true);
+              setNotice("");
+            }}
+          >
+            Edit
+          </Button>
+        )}
+        {role === "admin" && saved && !editing ? (
+          <Button
+            onClick={() => {
+              const next = {
+                ...saved,
+                creditGiven: liveCredit?.given ?? saved.creditGiven,
+                creditPaid: liveCredit?.paid ?? saved.creditPaid,
+                credits: liveCredit?.unpaid ?? saved.credits,
+                accepted: !accepted,
+              };
+              book.setCashClose(next);
+              setResult({
+                ok: true,
+                message: next.accepted ? `${formatDay(date)} accepted. Staff cannot change it.` : `${formatDay(date)} opened again.`,
+              });
+              void pushClose(date, next).catch((error: unknown) => {
+                setResult({ ok: false, message: error instanceof Error ? error.message : "Saved on this browser, but not shared." });
+              });
+            }}
+          >
+            {accepted ? "Open again" : "Accept"}
+          </Button>
+        ) : null}
+        {locked ? null : confirmClear ? (
+          <>
+            <Button
+              variant="danger"
+              onClick={() => {
+                book.clearCashClose(date);
+                void pushClose(date, null).catch(() => undefined);
+                setDraft(blank(date, 0, counterName(book.employees, user?.displayName)));
+                setEditing(true);
+                setConfirmClear(false);
+                setResult({ ok: true, message: `Closing for ${formatDay(date)} successfully cleared.` });
+              }}
+            >
+              Clear {formatDay(date)}
+            </Button>
+            <Button variant="secondary" onClick={() => setConfirmClear(false)}>
+              Keep
+            </Button>
+          </>
+        ) : (
+          <Button variant="secondary" onClick={() => setConfirmClear(true)}>
+            Clear
+          </Button>
+        )}
+        <Button variant="secondary" onClick={() => window.print()}>
+          Print
+        </Button>
+      </div>
+      {notice ? <p className="no-print mt-3 text-center text-sm text-muted">{notice}</p> : null}
+      <ResultDialog result={result} onClose={() => setResult(null)} />
     </div>
   );
 }
@@ -665,7 +750,7 @@ function PaidOut({
   const [pending, setPending] = useState(false);
   const total = rows.reduce((sum, row) => sum + row.amount, 0);
   return (
-    <section className="mt-4 rounded-xl border border-line bg-surface p-5">
+    <section className="mx-auto mt-3 max-w-lg rounded-xl border border-line bg-surface p-4">
       <div className="flex items-baseline justify-between gap-3">
         <h2 className="font-medium">Paid out</h2>
         <p className="text-sm tabular-nums text-muted">{inr(total)}</p>
