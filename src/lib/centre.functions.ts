@@ -1791,7 +1791,8 @@ async function resyncCounterSplits(
     seen.add(day.date);
     const creditService = creditByDate.get(day.date) ?? 0;
     if (!day.note.startsWith("Entered on the counter")) {
-      return [{ ...day, personalGpay: fresh.personalGpay, departmentGpay: fresh.departmentGpay, bankDepartment: fresh.bankDepartment, creditService }];
+      if (fresh.amount <= 0) return [{ ...day, personalGpay: fresh.personalGpay, departmentGpay: fresh.departmentGpay, bankDepartment: fresh.bankDepartment, creditService }];
+      return [{ ...day, amount: fresh.amount, note: "Entered on the counter", splits: fresh.splits, personalGpay: fresh.personalGpay, departmentGpay: fresh.departmentGpay, bankDepartment: fresh.bankDepartment, creditService }];
     }
     if (fresh.amount <= 0) return [];
     return [{ ...day, amount: fresh.amount, splits: fresh.splits, personalGpay: fresh.personalGpay, departmentGpay: fresh.departmentGpay, bankDepartment: fresh.bankDepartment, creditService }];

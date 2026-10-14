@@ -5,7 +5,7 @@ import { ResultDialog, type Result } from "@/components/result-dialog";
 import { MoneyField } from "@/components/money-field";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/cn";
-import { inr, signedInr } from "@/lib/format";
+import { inr } from "@/lib/format";
 import {
   NOTE_ROWS,
   accountLines,
@@ -522,21 +522,17 @@ function CheckCard({
       >
         {diffLabel(shown.difference)}
       </p>
-      <h2 className="mt-5 font-medium">Against last closing</h2>
+      <h2 className="mt-5 font-medium">Put together</h2>
       <dl className="mt-3 grid gap-2 text-base">
-        <Pair label={`Last closing, ${formatDay(check.lastDate)}`} value={inr(check.last)} />
-        <Pair label="Movement" value={signedInr(check.movement)} />
-        <Pair label="Receipts into the centre" value={inr(check.receipts)} />
-        <Pair label="Service charge kept in the centre" value={inr(Math.max(0, check.receipts - check.advanceIn - paid))} />
-        {check.advanceIn > 0 ? <Pair label="Advance received into the centre" value={inr(check.advanceIn)} /> : null}
-        {paid > 0 ? <Pair label="Credit repaid into the centre" value={inr(paid)} /> : null}
-        <Pair label="Payments out of the centre" value={inr(check.payments)} />
-        {check.bankDepartment > 0 ? <Pair label="Department paid from our bank" value={inr(check.bankDepartment)} /> : null}
-        {check.paidOut > 0 ? <Pair label="Expenses paid from the centre" value={inr(check.paidOut)} /> : null}
-        {check.profitTaken > 0 ? <Pair label="Transfer to personal account" value={inr(check.profitTaken)} /> : null}
-        {check.personalGpay > 0 ? <Pair label="Personal GPay, not counted" value={inr(check.personalGpay + check.departmentGpay)} /> : null}
-        {check.advanceServed > 0 ? <Pair label="Advance served, not counted" value={inr(check.advanceServed)} /> : null}
-        {given > 0 ? <Pair label="Credit given, not counted" value={inr(given)} /> : null}
+        <Pair label={`Opening, ${formatDay(check.lastDate)}`} value={inr(check.last)} />
+        <Pair label="Service charge from the counter" value={check.collected == null ? "—" : inr(Math.max(0, (check.collected ?? 0) - check.personalGpay))} />
+        {check.personalGpay + check.departmentGpay > 0 ? <Pair label="Personal GPay, not a shortage" value={inr(check.personalGpay + check.departmentGpay)} /> : null}
+        {given > 0 ? <Pair label="Credit given, not a shortage" value={inr(given)} /> : null}
+        {paid > 0 ? <Pair label="Credit repaid, not an excess" value={inr(paid)} /> : null}
+        {check.advanceIn > 0 ? <Pair label="Advance received, not an excess" value={inr(check.advanceIn)} /> : null}
+        {check.advanceServed > 0 ? <Pair label="Advance served, not a shortage" value={inr(check.advanceServed)} /> : null}
+        {check.paidOut > 0 ? <Pair label="Expenses" value={inr(check.paidOut)} /> : null}
+        {check.profitTaken > 0 ? <Pair label="Transferred out" value={inr(check.profitTaken)} /> : null}
       </dl>
       {hold ? null : shown.missing.length > 0 ? (
         <p className="mt-3 text-sm text-muted">

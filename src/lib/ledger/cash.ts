@@ -151,6 +151,19 @@ export function unfixedAmount(difference: number, fixed: number): number {
   return difference > 0 ? difference - settled : difference + settled;
 }
 
+export type AccountBook = {
+  opening: number;
+  collections: number;
+  otherReceipts: number;
+  transfersIn: number;
+  expenses: number;
+  department: number;
+  transfersOut: number;
+  expected: number;
+  actual: number | null;
+  difference: number | null;
+};
+
 export type CloseCheck = {
   last: number | null;
   lastDate: string;
@@ -167,6 +180,12 @@ export type CloseCheck = {
   paidOut: number;
   receipts: number;
   payments: number;
+  serviceEarned: number;
+  income: number;
+  cashBook: AccountBook;
+  centreBook: AccountBook;
+  personalBook: AccountBook;
+  walletBook: AccountBook;
   missing: string[];
   difference: number | null;
   unfixed: number | null;
@@ -181,56 +200,72 @@ function closeGap(row: CashClose, last: CashClose | null) {
   };
 }
 
+function accountBook(input: Omit<AccountBook, "expected" | "difference">): AccountBook {
+  const expected =
+    input.opening + input.collections + input.otherReceipts + input.transfersIn - input.expenses - input.department - input.transfersOut;
+  return { ...input, expected, difference: input.actual == null ? null : input.actual - expected };
+}
+
+function idleBook(): AccountBook {
+  return accountBook({ opening: 0, collections: 0, otherReceipts: 0, transfersIn: 0, expenses: 0, department: 0, transfersOut: 0, actual: null });
+}
+
 export function checkClose(
   row: CashClose,
   closes: CashClose[],
   days: CollectionDay[],
   holidays: string[],
-  payouts: { date: string; amount: number }[] = [],
+  payouts: { date: string; amount: number; category?: string }[] = [],
 ): CloseCheck {
   const last = previousClose(closes, row.date);
   const gap = closeGap(row, last);
-  if (!last) {
-    return { last: null, lastDate: "", movement: null, collected: null, personalGpay: 0, departmentGpay: 0, bankDepartment: 0, paidOut: 0, receipts: 0, payments: 0, ...gap, advanceChange: 0, advanceServed: 0, advanceIn: 0, missing: [], difference: null, unfixed: null };
-  }
+  const idle = idleBook();
+  const empty = { last: null as number | null, lastDate: "", movement: null as number | null, collected: null as number | null, personalGpay: 0, departmentGpay: 0, bankDepartment: 0, paidOut: 0, receipts: 0, payments: 0, serviceEarned: 0, income: 0, cashBook: idle, centreBook: idle, personalBook: idle, walletBook: idle, ...gap, advanceChange: 0, advanceServed: 0, advanceIn: 0, missing: [] as string[], difference: null as number | null, unfixed: null as number | null };
+  if (!last) return empty;
   const span = spanDates(last.date, row.date);
+  const counterDay = (date: string) => days.find((item) => item.date === date && item.note.startsWith("Entered on the counter"));
   const paidOut = payouts.reduce((sum, item) => (span.includes(item.date) ? sum + (item.amount || 0) : sum), 0);
-  const missing = span.filter((date) => !isSunday(date) && !holidays.includes(date) && aewsCollection(days, date) == null);
-  const known = span.reduce((sum, date) => sum + (aewsCollection(days, date) ?? 0), 0);
-  const personalGpay = span.reduce((sum, date) => sum + (days.find((item) => item.date === date)?.personalGpay ?? 0), 0);
-  const departmentGpay = span.reduce((sum, date) => sum + (days.find((item) => item.date === date)?.departmentGpay ?? 0), 0);
-  const bankDepartment = span.reduce((sum, date) => sum + (days.find((item) => item.date === date)?.bankDepartment ?? 0), 0);
-  let previous = closeBase(last);
-  let movement = closeBase(row) - previous;
+  const missing = span.filter((date) => !isSunday(date) && !holidays.includes(date) && !counterDay(date));
+  const known = span.reduce((sum, date) => sum + (counterDay(date)?.amount ?? 0), 0);
+  const personalGpay = span.reduce((sum, date) => sum + (counterDay(date)?.personalGpay ?? 0), 0);
+  const departmentGpay = span.reduce((sum, date) => sum + (counterDay(date)?.departmentGpay ?? 0), 0);
+  const bankDepartment = span.reduce((sum, date) => sum + (counterDay(date)?.bankDepartment ?? 0), 0);
+  const base = { personalGpay, departmentGpay, bankDepartment, paidOut, ...gap };
+  const opening = closeBase(last);
+  const movement = closeBase(row) - opening;
   if (!countStarted(row) && !row.accepted) {
-    return { last: closeBase(last), lastDate: last.date, movement: null, collected: missing.length > 0 ? null : known, personalGpay, departmentGpay, bankDepartment, paidOut, receipts: 0, payments: 0, ...gap, missing, difference: null, unfixed: null, advanceIn: 0 };
+    return { ...empty, last: opening, lastDate: last.date, collected: missing.length > 0 ? null : known, ...base, missing };
   }
   if (missing.length > 0) {
-    return { last: closeBase(last), lastDate: last.date, movement, collected: null, personalGpay, departmentGpay, bankDepartment, paidOut, receipts: 0, payments: 0, ...gap, missing, difference: null, unfixed: null, advanceIn: 0 };
+    return { ...empty, last: opening, lastDate: last.date, movement, ...base, missing };
   }
   const spanRows = [...closes.filter((item) => span.includes(item.date) && item.date !== row.date), row];
+  const creditGiven = spanRows.reduce((sum, item) => sum + creditGivenTotal(item), 0);
   const creditPaid = spanRows.reduce((sum, item) => sum + creditPaidTotal(item), 0);
-  const creditOnCounter = span.reduce((sum, date) => sum + (days.find((item) => item.date === date)?.creditService ?? 0), 0);
-  // Difference = (today centre balance − last centre balance) − receipts + payments.
-  // A service, an old advance, or a credit is not cash. Only money that entered or left the centre counts.
-  const centreService = Math.max(0, known - personalGpay - Math.max(creditOnCounter, 0));
-  const advanceIn =
-    typeof row.advanceIn === "number" ? Math.max(0, row.advanceIn) : Math.max(0, gap.advanceChange + (row.advanceServed ?? 0));
-  const receipts = centreService + creditPaid + advanceIn;
-  const payments = bankDepartment + paidOut + (row.profitTaken ?? 0);
-  const difference = movement - receipts + payments;
+  const advanceIn = typeof row.advanceIn === "number" ? Math.max(0, row.advanceIn) : Math.max(0, gap.advanceChange + (row.advanceServed ?? 0));
+  const advanceServed = row.advanceServed ?? 0;
+  const transfer = row.profitTaken ?? 0;
+  // Staff do not enter a service charge for a credit. The counter total is only money typed as a service charge.
+  // Personal GPay is service charge plus department pay. The department pay leaves the centre account, and neither part is centre cash.
+  const centreService = Math.max(0, known - personalGpay);
+  const departmentOut = departmentGpay + bankDepartment;
+  const expected = opening + centreService + creditPaid + advanceIn - creditGiven - advanceServed - departmentOut - paidOut - transfer;
+  const actual = closeBase(row);
+  const difference = actual - expected;
   return {
-    last: previous,
+    last: opening,
     lastDate: last.date,
     movement,
     collected: known,
-    personalGpay,
-    departmentGpay,
-    bankDepartment,
-    paidOut,
-    receipts,
-    payments,
-    ...gap,
+    ...base,
+    receipts: centreService,
+    payments: paidOut + transfer + departmentOut,
+    serviceEarned: known,
+    income: known - paidOut,
+    cashBook: idle,
+    centreBook: idle,
+    personalBook: idle,
+    walletBook: idle,
     advanceIn,
     missing: [],
     difference,

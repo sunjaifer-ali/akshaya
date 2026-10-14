@@ -64,6 +64,7 @@ export type CashClose = {
   profitTaken?: number;
   profitNote?: string;
   creditSeparate?: boolean;
+  personalBalance?: number;
 };
 
 export type CentrePayout = {

@@ -326,6 +326,7 @@ export const useLedger = create<LedgerState>()(
             profitTaken: rupee(close.profitTaken ?? 0),
             profitNote: (close.profitNote ?? "").trim().slice(0, 80),
             creditSeparate: Boolean(close.creditSeparate),
+            ...(typeof close.personalBalance === "number" ? { personalBalance: rupee(close.personalBalance) } : {}),
           };
           const rest = state.cashCloses.filter((item) => item.date !== close.date);
           const cashCloses = [...rest, next].sort((a, b) => (a.date < b.date ? -1 : 1));
