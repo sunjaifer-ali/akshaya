@@ -91,6 +91,7 @@ function StaffPage() {
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<Employee | null>(null);
   const [result, setResult] = useState<Result | null>(null);
+  const [day, setDay] = useState(today || "");
   const left = book.employees.filter((employee) => !employee.active && !rows.some((row) => row.employee.id === employee.id));
 
   return (
@@ -114,6 +115,7 @@ function StaffPage() {
                 void navigate({ search: { m: next, e: selectedId } });
               }}
             />
+            <input type="date" aria-label="Staff date" className="h-11 rounded-sm border border-line bg-bg px-3 text-base" value={day || today} onChange={(event) => setDay(event.target.value)} />
           </div>
         }
       />
@@ -214,6 +216,7 @@ function StaffPage() {
                 </div>
               </div>
               <div className="mt-4 grid gap-3 sm:grid-cols-4">
+                <Mini label="That day" value={inr(book.days.find((item) => item.date === (day || today))?.splits[selected.employee.id] ?? 0)} />
                 <Mini label="Year collection" value={inr(ytdCollection)} />
                 <Mini label="Year salary" value={inr(ytdPay)} />
                 <Mini label="Pay % of their work" value={ytdCollection > 0 ? pct((ytdPay / ytdCollection) * 100) : "—"} />

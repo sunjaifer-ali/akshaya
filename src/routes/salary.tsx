@@ -8,7 +8,7 @@ import { ResultDialog, type Result } from "@/components/result-dialog";
 import { Button } from "@/components/ui/button";
 import { inr, pct } from "@/lib/format";
 import { employeeSplitSum, leaveTally, monthCollection, staffMonthRows, type StaffMonthRow } from "@/lib/ledger/calc";
-import { formatMonth } from "@/lib/ledger/dates";
+import { formatMonth, formatMonthShort, fyMonths, fyStartYear } from "@/lib/ledger/dates";
 import { useLedger } from "@/lib/ledger/store";
 import type { Employee } from "@/lib/ledger/types";
 import { readMonth } from "@/lib/search";
@@ -150,6 +150,8 @@ function SalaryPage() {
           />
         </section>
       ) : null}
+
+      <SalaryGiven month={month} today={today} />
 
       <StaffDialog
         open={open}
@@ -400,5 +402,46 @@ function SlipMoney({ label, value }: { label: string; value: string }) {
       <p className="text-muted">{label}</p>
       <p className="tabular-nums font-medium">{value}</p>
     </div>
+  );
+}
+
+function SalaryGiven({ month, today }: { month: string; today: string }) {
+  const book = useLedger();
+  const months = fyMonths(fyStartYear(month)).filter((item) => !today || item <= today.slice(0, 7));
+  const people = book.employees.filter((employee) => employee.active || months.some((item) => employeeSplitSum(book.days, employee.id, item) > 0));
+  return (
+    <section className="mt-4 overflow-x-auto rounded-xl border border-line bg-surface">
+      <h2 className="px-4 pt-4 font-medium">Salary given</h2>
+      <p className="px-4 pb-2 text-sm text-muted">Basic pay plus incentive for each month.</p>
+      <table className="w-full min-w-[36rem] text-sm">
+        <thead>
+          <tr className="border-b border-line text-left text-xs font-semibold tracking-widest text-faint">
+            <th className="px-3 py-2 font-medium">Staff</th>
+            <th className="px-3 py-2 font-medium">Month</th>
+            <th className="px-3 py-2 text-right font-medium">Basic</th>
+            <th className="px-3 py-2 text-right font-medium">Incentive</th>
+            <th className="px-3 py-2 text-right font-medium">Given</th>
+          </tr>
+        </thead>
+        <tbody>
+          {people.flatMap((employee) =>
+            months.map((item) => {
+              const collection = monthCollection(book.days, item);
+              const row = staffMonthRows(book.employees, book.days, book.perfOverrides, book.leaves, book.holidays, item, collection, book.deductLwp, today).find((person) => person.employee.id === employee.id);
+              if (!row || (row.pay.gross <= 0 && row.collection <= 0)) return [];
+              return [
+                <tr key={`${employee.id}-${item}`} className="border-t border-line">
+                  <td className="px-3 py-2">{employee.name}</td>
+                  <td className="px-3 py-2">{formatMonthShort(item)}</td>
+                  <td className="px-3 py-2 text-right tabular-nums">{inr(row.pay.basicPayable)}</td>
+                  <td className="px-3 py-2 text-right tabular-nums">{inr(row.pay.incentive)}</td>
+                  <td className="px-3 py-2 text-right font-medium tabular-nums">{inr(row.pay.gross)}</td>
+                </tr>,
+              ];
+            }),
+          )}
+        </tbody>
+      </table>
+    </section>
   );
 }

@@ -1,7 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { CentreCredit } from "@/components/centre-credit";
 import { authClient, markDeskOpen } from "@/lib/auth/client";
 import { centreHasAdmin, claimAdmin, loginChoices, recordLogin, type LoginChoice } from "@/lib/centre.functions";
 import { centreEmail, cleanUsername } from "@/lib/username";
@@ -165,7 +164,9 @@ function LoginPage() {
           </div>
         ) : null}
       </form>
-      <CentreCredit />
+      <p className="mt-6 max-w-sm text-center text-xs leading-relaxed text-muted">
+        App developed for Akshaya Centre Thrikkadeeri by Jaifer M. E-mail: akspkd209@gmail.com. Mob: 9495663369
+      </p>
     </main>
   );
 }

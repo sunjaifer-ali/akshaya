@@ -103,37 +103,6 @@ function LeavePage() {
         </div>
       )}
 
-      <ul className="mt-3 flex flex-wrap gap-2 text-xs text-muted">
-        <li className="rounded-sm bg-accent-soft px-2 py-1 text-accent">CL casual</li>
-        <li className="rounded-sm bg-warn-soft px-2 py-1 text-warn">SL sick</li>
-        <li className="rounded-sm bg-bad-soft px-2 py-1 text-bad">LWP unpaid</li>
-        <li className="rounded-sm bg-surface-2 px-2 py-1">HD half · WO off · H holiday</li>
-      </ul>
-
-      {people.length > 0 ? (
-        <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {people.map((employee) => {
-            const attendance = countAttendance(book.leaves, employee.id, month, book.holidays, today);
-            return (
-              <article key={employee.id} className="rounded-xl border border-line bg-surface p-5">
-                <h2 className="font-medium">{employee.name}</h2>
-                <dl className="mt-2 grid grid-cols-2 gap-y-1 text-sm">
-                  <dt className="text-muted">Present</dt>
-                  <dd className="text-right tabular-nums">{attendance.present}</dd>
-                  <dt className="text-muted">Casual</dt>
-                  <dd className="text-right tabular-nums">{attendance.tally.CL}</dd>
-                  <dt className="text-muted">Sick</dt>
-                  <dd className="text-right tabular-nums">{attendance.tally.SL}</dd>
-                  <dt className="text-muted">Unpaid</dt>
-                  <dd className="text-right tabular-nums">{attendance.tally.LWP}</dd>
-                  <dt className="text-muted">Half days</dt>
-                  <dd className="text-right tabular-nums">{attendance.tally.HD}</dd>
-                </dl>
-              </article>
-            );
-          })}
-        </div>
-      ) : null}
       </div>
 
       {people.length > 0 ? (

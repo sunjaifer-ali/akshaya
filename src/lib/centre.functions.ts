@@ -740,19 +740,12 @@ export const closingAdvance = createServerFn({ method: "GET" })
         service: row.service,
         amount: Number(row.amount),
       }));
-    const received = rows.reduce((sum, row) => (String(row.taken_on).slice(0, 10) === date ? sum + Number(row.amount) : sum), 0);
-    const used = rows.reduce((sum, row) => (row.used_on && String(row.used_on).slice(0, 10) === date ? sum + Number(row.amount) : sum), 0);
+    const received = rows.reduce((sum, row) => (dayText(row.taken_on) === date ? sum + Number(row.amount) : sum), 0);
+    const used = rows.reduce((sum, row) => (row.used_on && dayText(row.used_on) === date ? sum + Number(row.amount) : sum), 0);
     const lastDate = last?.date ?? "";
-    const taken = rows.reduce((sum, row) => {
-      const on = String(row.taken_on).slice(0, 10);
-      if (!lastDate || on <= lastDate || on > date) return sum;
-      return sum + Number(row.amount);
-    }, 0);
-    const served = rows.reduce((sum, row) => {
-      const usedOn = row.used_on ? String(row.used_on).slice(0, 10) : "";
-      if (!lastDate || !usedOn || usedOn > date || usedOn <= lastDate) return sum;
-      return sum + Number(row.amount);
-    }, 0);
+    // These two are only this date. A later closing must not pick them up again.
+    const taken = received;
+    const served = used;
     return { held: heldOf(date), lastDate, lastHeld: last ? heldOf(last.date) : 0, received, used, served, taken, open, paid, tracked: rows.length > 0 };
   });
 
@@ -1470,6 +1463,94 @@ export const personalGpayMonth = createServerFn({ method: "GET" })
     };
   });
 
+export const personalGpaySpan = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
+  .validator((input: { from: string; to: string }) => {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(input.from) || !/^\d{4}-\d{2}-\d{2}$/.test(input.to)) throw new Error("Pick the dates.");
+    return input.from <= input.to ? input : { from: input.to, to: input.from };
+  })
+  .handler(async ({ context, data }) => {
+    const role = await requireMember(context.userId);
+    const { getSql } = await import("@/lib/db");
+    const sql = await getSql();
+    await ensureServiceTable(sql);
+    const today = indiaToday();
+    const from = role === "employee" ? today : data.from;
+    const to = role === "employee" ? today : data.to;
+    const rows = await sql<{ taken_on: string; staff: string; customer: string; mobile: string; service: string; amount: number; department: number }>`
+      select taken_on::text as taken_on, staff_name as staff, customer, mobile, service, amount, department
+      from service_entry
+      where personal_gpay and taken_on >= ${from} and taken_on <= ${to}
+      order by taken_on desc, created_at desc
+    `;
+    return {
+      role,
+      from,
+      to,
+      lines: rows.map((row) => ({
+        date: String(row.taken_on).slice(0, 10),
+        staff: row.staff,
+        customer: row.customer,
+        mobile: row.mobile,
+        service: row.service,
+        amount: Number(row.amount) || 0,
+        department: Number(row.department) || 0,
+      })),
+    };
+  });
+
+export const listNotices = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
+  .handler(async ({ context }) => {
+    await requireMember(context.userId);
+    const { getSql } = await import("@/lib/db");
+    const sql = await getSql();
+    await sql.query(
+      `create table if not exists centre_notice (
+        id text primary key,
+        body text not null,
+        author text not null,
+        created_at timestamptz not null default now()
+      )`,
+    );
+    const rows = await sql<{ id: string; body: string; author: string; at: string }>`
+      select id, body, author, created_at::text as at from centre_notice order by created_at desc limit 30
+    `;
+    return { lines: rows.map((row) => ({ id: row.id, body: row.body, author: row.author, at: String(row.at).slice(0, 16).replace("T", " ") })) };
+  });
+
+export const addNotice = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((body: string) => {
+    const text = body.trim().slice(0, 400);
+    if (!text) throw new Error("Write the message.");
+    return text;
+  })
+  .handler(async ({ context, data }) => {
+    await requireAdmin(context.userId);
+    const { getSql } = await import("@/lib/db");
+    const sql = await getSql();
+    await sql.query(`create table if not exists centre_notice (id text primary key, body text not null, author text not null, created_at timestamptz not null default now())`);
+    const member = await sql<{ name: string }>`select name from centre_member where user_id = ${context.userId}`;
+    await sql`insert into centre_notice (id, body, author) values (${crypto.randomUUID()}, ${data}, ${member[0]?.name || "Admin"})`;
+    return { ok: true };
+  });
+
+export const removeNotice = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((id: string) => {
+    const value = id.trim();
+    if (!value) throw new Error("That message was not found.");
+    return value;
+  })
+  .handler(async ({ context, data }) => {
+    await requireAdmin(context.userId);
+    const { getSql } = await import("@/lib/db");
+    const sql = await getSql();
+    await sql`delete from centre_notice where id = ${data}`;
+    return { ok: true };
+  });
+
 export const serviceDay = createServerFn({ method: "GET" })
   .middleware([authMiddleware])
   .validator((date: string) => {
@@ -1808,6 +1889,24 @@ async function resyncCounterSplits(
     if (date < today) next = applyImportedLeave(next, date, clockByDate.get(date));
   }
   return { book: next, dates: [...byDate.keys()] };
+}
+
+function wallClock(value: unknown): string {
+  if (value == null || value === "") return "";
+  if (value instanceof Date) {
+    const text = new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" }).format(value);
+    return text.slice(0, 8);
+  }
+  const text = String(value);
+  if (text.includes("T") || text.endsWith("Z")) {
+    const date = new Date(text);
+    if (!Number.isNaN(date.getTime())) {
+      const local = new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" }).format(date);
+      return local.slice(0, 8);
+    }
+  }
+  const match = text.match(/(\d{2}):(\d{2}):(\d{2})/);
+  return match ? `${match[1]}:${match[2]}:${match[3]}` : "";
 }
 
 function indiaToday(): string {
@@ -2457,8 +2556,10 @@ function applyImportedLeave(
       if (!employee.active) continue;
       const worked = (day.splits[employee.id] ?? 0) > 0;
       const clock = clocks.get(employee.id);
-      // Half day only when the first entry is after 12 pm. A last entry before 2 pm is a normal morning, not a half day.
-      const half = Boolean(clock && clock.first > "12:00:00");
+      // Half day only when the first charge is after 12:00 India time. A bare time is already India time.
+      // A full timestamp must not be compared as text, or every staff member becomes a half day.
+      const first = wallClock(clock?.first);
+      const half = first > "12:00:00";
       if (worked) {
         const previous = book.leaves.find((mark) => mark.employeeId === employee.id && mark.date === date);
         if (previous && previous.code !== "LWP" && previous.code !== "HD") continue;

@@ -115,8 +115,8 @@ function ClosingPage() {
     creditSeparate: separate,
     ...(liveCredit ? { creditGiven: liveCredit.given, creditPaid: liveCredit.paid, credits: liveCredit.unpaid } : {}),
     advanceHeld: useLiveAdvance ? liveAdvance!.held : (base.advanceHeld ?? 0),
-    advanceServed: useLiveAdvance ? liveAdvance!.served : (base.advanceServed ?? 0),
-    advanceIn: useLiveAdvance ? liveAdvance!.taken ?? base.advanceIn : base.advanceIn,
+    advanceServed: useLiveAdvance ? liveAdvance!.used : (base.advanceServed ?? 0),
+    advanceIn: useLiveAdvance ? liveAdvance!.received : base.advanceIn,
   };
   const closing = moneyInHand(row);
   const cash = cashInHand(row.notes);
@@ -126,7 +126,7 @@ function ClosingPage() {
   const tallyReady = counted;
   const previewCloses = (tallyReady ? [...book.cashCloses.filter((item) => item.date !== date), row] : book.cashCloses).map((item) => {
     if (!useLiveAdvance || !liveAdvance) return item;
-    if (item.date === date) return { ...item, advanceHeld: liveAdvance.held, advanceServed: liveAdvance.served };
+    if (item.date === date) return { ...item, advanceHeld: liveAdvance.held, advanceServed: liveAdvance.used };
     if (liveAdvance.lastDate && item.date === liveAdvance.lastDate) return { ...item, advanceHeld: liveAdvance.lastHeld };
     return item;
   });

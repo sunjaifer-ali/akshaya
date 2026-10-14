@@ -17,7 +17,7 @@ export const Route = createRootRoute({
         content:
           "Month collections, staff salary, expenses, leave, and centre performance for Akshaya Centre Thrikkadeeri.",
       },
-      { name: "theme-color", content: "#1e6b43" },
+      { name: "theme-color", content: "#1a4f9c" },
     ],
     links: [
       { rel: "icon", type: "image/png", href: "/akshaya-logo.png" },

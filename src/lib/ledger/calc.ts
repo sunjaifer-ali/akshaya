@@ -13,7 +13,10 @@ export function monthDays(days: CollectionDay[], month: string): CollectionDay[]
 }
 
 export function monthCollection(days: CollectionDay[], month: string): number {
-  return monthDays(days, month).reduce((sum, day) => sum + day.amount, 0);
+  const rows = monthDays(days, month);
+  const daily = rows.filter((day) => !/centre sheet|month total/i.test(day.note));
+  const source = daily.some((day) => day.amount > 0) ? daily : rows;
+  return source.reduce((sum, day) => sum + day.amount, 0);
 }
 
 export function daysEntered(days: CollectionDay[], month: string): number {
@@ -201,7 +204,10 @@ function comparableLastYear(
 ) {
   const prior = lastYearFigure(days, lyOverrides, month, asOf);
   const inProgress = Boolean(asOf) && asOf.slice(0, 7) === month;
-  if (!inProgress || prior.source !== "entered" || prior.amount == null) return prior;
+  if (!inProgress || prior.amount == null) return prior;
+  const priorDays = monthDays(days, lastYearMonth(month));
+  const lump = prior.source === "entered" || (priorDays.length > 0 && priorDays.every((day) => /centre sheet|month total/i.test(day.note)));
+  if (!lump) return prior;
   const full = workingDaysInMonth(month, holidays);
   const closed = new Set(holidays);
   const elapsed = datesInMonth(month).filter((date) => date <= asOf && !isSunday(date) && !closed.has(date)).length;

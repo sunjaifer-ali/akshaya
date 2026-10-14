@@ -8,7 +8,8 @@ import { Button } from "@/components/ui/button";
 import { chartColors } from "@/lib/chart-colors";
 import { inr, inrShort, pct, signedInr } from "@/lib/format";
 import { centreSnapshot, type CentreSnapshot } from "@/lib/ledger/calc";
-import { fyLabel, fyMonths, fyStartYear, formatMonthShort } from "@/lib/ledger/dates";
+import { checkClose } from "@/lib/ledger/cash";
+import { fyLabel, fyMonths, fyStartYear, formatDay, formatMonthShort } from "@/lib/ledger/dates";
 import { useLedger } from "@/lib/ledger/store";
 import { readYear } from "@/lib/search";
 import { useMounted } from "@/lib/use-mounted";
@@ -47,6 +48,8 @@ function CentrePage() {
   );
   const visible = rows.filter((row) => row.month <= anchor || row.collection > 0 || row.expense > 0);
   const [picked, setPicked] = useState(anchor);
+  const [view, setView] = useState<"day" | "month" | "year">("year");
+  const [day, setDay] = useState(today || "");
   const inThisYear = rows.find((row) => row.month === picked);
   const selected = inThisYear ?? visible[visible.length - 1] ?? rows[0];
 
@@ -130,7 +133,31 @@ function CentrePage() {
         <Mini label="Margin" value={inr(totals.margin)} />
         <Mini label="Growth" value={growth == null ? "—" : `${signedInr(growth)} · ${pct(growthPct)}`} />
       </section>
+      <div className="no-print mt-4 flex flex-wrap items-center gap-2">
+        {(["day", "month", "year"] as const).map((item) => (
+          <Button key={item} variant={view === item ? "primary" : "secondary"} onClick={() => setView(item)}>
+            {item === "day" ? "Date" : item === "month" ? "Month" : "Year"}
+          </Button>
+        ))}
+        {view === "day" ? (
+          <input type="date" aria-label="Statement date" className="h-11 rounded-sm border border-line bg-bg px-3 text-base" value={day || today} onChange={(event) => setDay(event.target.value)} />
+        ) : null}
+      </div>
+      {view === "day" ? <DayStatement date={day || today} /> : null}
+      {view === "month" && selected ? (
+        <section className="mt-4 rounded-xl border border-line bg-surface p-5">
+          <h2 className="font-display text-2xl">{formatMonthShort(selected.month)}</h2>
+          <div className="mt-3 grid gap-3 sm:grid-cols-4">
+            <Mini label="Collection" value={inr(selected.collection)} />
+            <Mini label="Expense" value={inr(selected.expense)} />
+            <Mini label="Salary" value={inr(selected.salary)} />
+            <Mini label="Growth vs last year" value={selected.growth == null ? "—" : `${signedInr(selected.growth)} · ${pct(selected.growthPct)}`} />
+          </div>
+        </section>
+      ) : null}
 
+      {view === "year" ? (
+      <>
       <section className="print-chart mt-4 rounded-xl border border-line bg-surface p-5">
         <h2 className="font-display text-2xl">Collection against last year</h2>
         <div className="mt-3 h-64">
@@ -200,9 +227,27 @@ function CentrePage() {
           </table>
         </div>
       </section>
+      </>
+      ) : null}
 
-      {selected ? <MonthDetail row={selected} onCommit={(amount) => book.setLastYear(selected.month, amount)} /> : null}
+      {view !== "day" && selected ? <MonthDetail row={selected} onCommit={(amount) => book.setLastYear(selected.month, amount)} /> : null}
     </div>
+  );
+}
+
+function DayStatement({ date }: { date: string }) {
+  const book = useLedger();
+  const amount = book.days.find((item) => item.date === date)?.amount ?? 0;
+  const close = book.cashCloses.find((item) => item.date === date);
+  const check = close ? checkClose(close, book.cashCloses, book.days, book.holidays, book.payouts ?? []) : null;
+  return (
+    <section className="mt-4 rounded-xl border border-line bg-surface p-5">
+      <h2 className="font-display text-2xl">{formatDay(date)}</h2>
+      <div className="mt-3 grid gap-3 sm:grid-cols-2">
+        <Mini label="Counter collection" value={inr(amount)} />
+        <Mini label="Closing" value={check?.difference == null ? "Not closed" : check.difference === 0 ? "Balanced" : check.difference < 0 ? `Short ${inr(Math.abs(check.difference))}` : `Excess ${inr(check.difference)}`} />
+      </div>
+    </section>
   );
 }
 

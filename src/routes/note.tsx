@@ -4,7 +4,7 @@ import { MonthBar } from "@/components/month-bar";
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import { useCurrentUserState } from "@/lib/auth/use-current-user";
-import { myRole } from "@/lib/centre.functions";
+import { addNotice, listNotices, myRole, removeNotice } from "@/lib/centre.functions";
 import { cn } from "@/lib/cn";
 import {
   centreSnapshot,
@@ -37,6 +37,7 @@ function NotePage() {
   const { user } = useCurrentUserState();
   const [role, setRole] = useState<"admin" | "employee">("employee");
   const [picked, setPicked] = useState("");
+  const [cardOpen, setCardOpen] = useState(false);
 
   useEffect(() => {
     void myRole()
@@ -97,9 +98,10 @@ function NotePage() {
   return (
     <div>
       <PageHeader
-        kicker="NOTE"
-        title={selected ? selected.name : "Month note"}
+        kicker="NOTICE"
+        title="Notice board"
         actions={
+          cardOpen ? (
           <div className="flex flex-wrap items-center gap-2">
             {role === "admin" ? (
               <select
@@ -117,9 +119,16 @@ function NotePage() {
             ) : null}
             <MonthBar month={month} onChange={(next) => void navigate({ search: { m: next } })} />
           </div>
+          ) : null
         }
       />
-      {!selected || !card ? (
+      <NoticeBoard admin={role === "admin"} />
+      <div className="mt-4">
+        <Button variant="secondary" onClick={() => setCardOpen((open) => !open)}>
+          {cardOpen ? "Hide month card" : "Month card"}
+        </Button>
+      </div>
+      {!cardOpen ? null : !selected || !card ? (
         <p className="rounded-xl border border-line bg-surface p-5 text-sm text-muted">Your name is not on the staff list yet.</p>
       ) : (
         <div className="mx-auto mt-2 max-w-xl">
@@ -140,9 +149,9 @@ function NotePage() {
               Download image
             </Button>
           </div>
-          <article className="relative overflow-hidden rounded-xl border border-[#c4a574] bg-surface px-5 py-8 sm:px-8">
+          <article className="relative overflow-hidden rounded-xl border border-[#2e9ad6] bg-surface px-5 py-8 sm:px-8">
             <div className="absolute inset-x-0 top-0 h-1.5 bg-accent" />
-            <div className="pointer-events-none absolute inset-2.5 rounded-lg border border-[#e6d3ae]" />
+            <div className="pointer-events-none absolute inset-2.5 rounded-lg border border-[#b7d7ef]" />
             <div className="relative">
               {card.honour === "lead" ? <LeadMark /> : null}
               <img src="/akshaya-logo.png" alt="" className="mx-auto h-auto w-20" />
@@ -151,7 +160,7 @@ function NotePage() {
               <p className="text-center text-sm text-muted">
                 {formatMonth(month)} · {DESK_LABEL[deskOf(selected)]}
               </p>
-              <p className={cn("mt-5 text-center text-base", card.honour === "lead" && "rounded-lg bg-[#f6edd9] px-4 py-3")}>{card.sentence}</p>
+              <p className={cn("mt-5 text-center text-base", card.honour === "lead" && "rounded-lg bg-[#d9ebf8] px-4 py-3")}>{card.sentence}</p>
               <dl className="mt-3">
                 {card.lines.map((line) => (
                   <div key={line.label} className="border-b border-line py-3">
@@ -174,6 +183,81 @@ function NotePage() {
   );
 }
 
+function NoticeBoard({ admin }: { admin: boolean }) {
+  const [lines, setLines] = useState<{ id: string; body: string; author: string; at: string }[]>([]);
+  const [text, setText] = useState("");
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState("");
+
+  const load = () => {
+    void listNotices()
+      .then((book) => setLines(book.lines))
+      .catch((caught: unknown) => setError(caught instanceof Error ? caught.message : "Notices did not open."));
+  };
+
+  useEffect(() => {
+    load();
+  }, []);
+
+  return (
+    <section className="rounded-xl border border-line bg-surface p-5">
+      {admin ? (
+        <form
+          className="mb-4 grid gap-2"
+          onSubmit={(event) => {
+            event.preventDefault();
+            setPending(true);
+            setError("");
+            void addNotice({ data: text })
+              .then(() => {
+                setText("");
+                load();
+              })
+              .catch((caught: unknown) => setError(caught instanceof Error ? caught.message : "The message was not sent."))
+              .finally(() => setPending(false));
+          }}
+        >
+          <textarea
+            aria-label="Message to staff"
+            className="min-h-24 w-full rounded-sm border border-line bg-bg px-3 py-2 text-base outline-none focus:border-accent"
+            value={text}
+            placeholder="Message to staff"
+            onChange={(event) => setText(event.target.value.slice(0, 400))}
+          />
+          <div>
+            <Button type="submit" disabled={pending}>
+              {pending ? "Sending…" : "Send to staff"}
+            </Button>
+          </div>
+        </form>
+      ) : null}
+      {error ? <p className="mb-3 text-sm text-bad">{error}</p> : null}
+      {lines.length === 0 ? <p className="text-sm text-muted">No message yet.</p> : null}
+      <ul className="divide-y divide-line">
+        {lines.map((line) => (
+          <li key={line.id} className="flex items-start justify-between gap-3 py-3">
+            <div>
+              <p className="text-base">{line.body}</p>
+              <p className="mt-1 text-xs text-faint">{line.at}</p>
+            </div>
+            {admin ? (
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => {
+                  void removeNotice({ data: line.id }).then(load).catch((caught: unknown) => setError(caught instanceof Error ? caught.message : "Not deleted."));
+                }}
+              >
+                Delete
+              </Button>
+            ) : null}
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
 function workedDays(month: string, holidays: string[], through: string): number {
   const closed = new Set(holidays);
   return datesInMonth(month).filter((date) => date <= through && !isSunday(date) && !closed.has(date)).length;
@@ -182,12 +266,12 @@ function workedDays(month: string, holidays: string[], through: string): number 
 function LeadMark() {
   return (
     <div className="mb-4 flex flex-col items-center">
-      <span className="grid size-16 place-items-center rounded-full border-2 border-[#b8893d] bg-[#f6edd9] text-[#8a5a12]">
+      <span className="grid size-16 place-items-center rounded-full border-2 border-[#1a4f9c] bg-[#d9ebf8] text-[#1a4f9c]">
         <svg viewBox="0 0 24 24" className="size-8" aria-hidden="true">
           <path fill="currentColor" d="M12 2.2 14.7 8l6.3.6-4.8 4.2 1.5 6.2L12 15.8 6.3 19l1.5-6.2L3 8.6 9.3 8z" />
         </svg>
       </span>
-      <p className="mt-2 text-[11px] font-semibold tracking-[0.22em] text-[#8a5a12]">DESK LEAD</p>
+      <p className="mt-2 text-[11px] font-semibold tracking-[0.22em] text-[#1a4f9c]">DESK LEAD</p>
     </div>
   );
 }
@@ -206,7 +290,7 @@ function toneClass(tone: NoteTone) {
   return "text-ink";
 }
 
-const NOTE_INK = { good: "#1e6b43", warn: "#8a5a12", ink: "#1c1b19" } as const;
+const NOTE_INK = { good: "#1a4f9c", warn: "#8a5a12", ink: "#102a4c" } as const;
 
 function downloadMonthNote(note: {
   centre: string;
@@ -257,17 +341,17 @@ function downloadMonthNote(note: {
     for (const line of note.lines) content += step(line);
     canvas.width = width;
     canvas.height = content + 84;
-    ctx.fillStyle = "#fbfaf7";
+    ctx.fillStyle = "#f4f9fd";
     ctx.fillRect(0, 0, width, canvas.height);
-    ctx.fillStyle = "#1e6b43";
+    ctx.fillStyle = "#1a4f9c";
     ctx.fillRect(0, 0, width, 16);
-    ctx.strokeStyle = "#c4a574";
+    ctx.strokeStyle = "#2e9ad6";
     ctx.lineWidth = 2;
     ctx.strokeRect(36, 40, width - 72, canvas.height - 76);
-    ctx.strokeStyle = "#e6d3ae";
+    ctx.strokeStyle = "#b7d7ef";
     ctx.lineWidth = 1;
     ctx.strokeRect(48, 52, width - 96, canvas.height - 100);
-    ctx.fillStyle = "#c4a574";
+    ctx.fillStyle = "#2e9ad6";
     diamond(ctx, 36, 40, 6);
     diamond(ctx, width - 36, 40, 6);
     diamond(ctx, 36, canvas.height - 36, 6);
@@ -277,7 +361,7 @@ function downloadMonthNote(note: {
     if (lead) {
       drawMedal(ctx, width / 2, y + 58);
       y += 160;
-      ctx.fillStyle = "#8a5a12";
+      ctx.fillStyle = "#1a4f9c";
       ctx.font = "600 22px \"Source Sans 3\", sans-serif";
       ctx.textAlign = "center";
       trackText(ctx, "DESK LEAD", width / 2, y, 6);
@@ -287,26 +371,26 @@ function downloadMonthNote(note: {
       ctx.drawImage(logo, (width - logoW) / 2, y, logoW, logoH);
       y += logoH + 36;
     }
-    ctx.fillStyle = "#5c574f";
+    ctx.fillStyle = "#3e5874";
     ctx.font = "500 28px \"Source Sans 3\", sans-serif";
     ctx.textAlign = "center";
     ctx.fillText(note.centre, width / 2, y);
     y += 78;
-    ctx.fillStyle = "#1c1b19";
+    ctx.fillStyle = "#102a4c";
     ctx.font = "600 72px Newsreader, Georgia, serif";
     ctx.fillText(note.name, width / 2, y);
     y += 48;
-    ctx.fillStyle = "#5c574f";
+    ctx.fillStyle = "#3e5874";
     ctx.font = "500 32px \"Source Sans 3\", sans-serif";
     ctx.fillText(`${note.month} · ${note.desk}`, width / 2, y);
     y += 64;
     if (lead) {
       const bandH = sentenceLines.length * 54 + 28;
       roundRect(ctx, pad, y - 36, width - pad * 2, bandH, 16);
-      ctx.fillStyle = "#f6edd9";
+      ctx.fillStyle = "#d9ebf8";
       ctx.fill();
     }
-    ctx.fillStyle = "#1c1b19";
+    ctx.fillStyle = "#102a4c";
     ctx.font = sentenceFont;
     ctx.textAlign = "center";
     for (const line of sentenceLines) {
@@ -315,14 +399,14 @@ function downloadMonthNote(note: {
     }
     y += lead ? 28 : 16;
     for (const line of note.lines) {
-      ctx.strokeStyle = "#e3ddd3";
+      ctx.strokeStyle = "#c5d9ec";
       ctx.lineWidth = 1;
       ctx.beginPath();
       ctx.moveTo(pad, y);
       ctx.lineTo(width - pad, y);
       ctx.stroke();
       y += 58;
-      ctx.fillStyle = "#5c574f";
+      ctx.fillStyle = "#3e5874";
       ctx.font = "500 30px \"Source Sans 3\", sans-serif";
       ctx.textAlign = "left";
       ctx.fillText(line.label, pad, y);
@@ -334,15 +418,15 @@ function downloadMonthNote(note: {
         y += 22;
         const barW = 280;
         roundRect(ctx, pad, y, barW, 10, 5);
-        ctx.fillStyle = "#eeece6";
+        ctx.fillStyle = "#d7e8f6";
         ctx.fill();
         roundRect(ctx, pad, y, Math.max(12, barW * (line.fill / 100)), 10, 5);
-        ctx.fillStyle = "#1e6b43";
+        ctx.fillStyle = "#1a4f9c";
         ctx.fill();
       }
       if (line.kind === "days" && line.fill != null && line.fill >= 99.5) {
         y += 36;
-        ctx.fillStyle = "#1e6b43";
+        ctx.fillStyle = "#1a4f9c";
         ctx.font = "600 22px \"Source Sans 3\", sans-serif";
         ctx.textAlign = "right";
         ctx.fillText("Every working day", width - pad, y);
@@ -400,14 +484,14 @@ function drawMedal(ctx: CanvasRenderingContext2D, cx: number, cy: number) {
   ctx.lineTo(cx + 10, cy + 64);
   ctx.lineTo(cx + 26, cy + 8);
   ctx.closePath();
-  ctx.fillStyle = "#1e6b43";
+  ctx.fillStyle = "#1a4f9c";
   ctx.fill();
   ctx.beginPath();
   ctx.arc(cx, cy - 6, 46, 0, Math.PI * 2);
-  ctx.fillStyle = "#f6edd9";
+  ctx.fillStyle = "#d9ebf8";
   ctx.fill();
   ctx.lineWidth = 4;
-  ctx.strokeStyle = "#b8893d";
+  ctx.strokeStyle = "#1a4f9c";
   ctx.stroke();
   ctx.beginPath();
   const outer = 22;
@@ -421,7 +505,7 @@ function drawMedal(ctx: CanvasRenderingContext2D, cx: number, cy: number) {
     else ctx.lineTo(x, y);
   }
   ctx.closePath();
-  ctx.fillStyle = "#8a5a12";
+  ctx.fillStyle = "#1a4f9c";
   ctx.fill();
 }
 

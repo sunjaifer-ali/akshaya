@@ -6,7 +6,7 @@ import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import { inr } from "@/lib/format";
 import { monthCollection, monthDays, staffMonthRows } from "@/lib/ledger/calc";
-import { formatDay, formatMonth } from "@/lib/ledger/dates";
+import { formatDay, formatMonth, formatMonthShort, fyMonths, fyStartYear } from "@/lib/ledger/dates";
 import { useLedger } from "@/lib/ledger/store";
 import { readMonth } from "@/lib/search";
 import { useResolvedMonth, useTodayKey } from "@/lib/use-today";
@@ -39,6 +39,10 @@ function CollectionsPage() {
   const savedDays = monthDays(book.days, month).filter((day) => day.amount > 0);
   const sheetOnly = savedDays.length === 1 && /centre sheet|month total from/i.test(savedDays[0]?.note ?? "");
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
+  const [view, setView] = useState<"day" | "month" | "year">("month");
+  const [day, setDay] = useState(today || "");
+  const yearMonths = fyMonths(fyStartYear(month));
+  const shownDays = view === "day" ? savedDays.filter((item) => item.date === (day || today)) : savedDays;
 
   return (
     <div>
@@ -46,18 +50,39 @@ function CollectionsPage() {
         kicker="COLLECTIONS"
         title="Collections"
         actions={
-          <MonthBar
-            month={month}
-            onChange={(next) => {
-              void navigate({ search: { m: next } });
-            }}
-          />
+          <div className="flex flex-wrap items-center gap-2">
+            {(["day", "month", "year"] as const).map((item) => (
+              <Button key={item} variant={view === item ? "primary" : "secondary"} onClick={() => setView(item)}>
+                {item === "day" ? "Date" : item === "month" ? "Month" : "Year"}
+              </Button>
+            ))}
+            {view === "day" ? (
+              <input type="date" aria-label="Collection date" className="h-11 rounded-sm border border-line bg-bg px-3 text-base" value={day || today} onChange={(event) => setDay(event.target.value)} />
+            ) : (
+              <MonthBar
+                month={month}
+                onChange={(next) => {
+                  void navigate({ search: { m: next } });
+                }}
+              />
+            )}
+          </div>
         }
       />
 
       <section className="mt-4 rounded-xl border border-line bg-surface p-5">
-        <h2 className="font-display text-2xl">{formatMonth(month)}</h2>
-        {savedDays.length === 0 ? <p className="mt-2 text-sm text-muted">No charges saved for this month yet.</p> : null}
+        <h2 className="font-display text-2xl">{view === "year" ? "This year" : view === "day" ? formatDay(day || today) : formatMonth(month)}</h2>
+        {view === "year" ? (
+          <ul className="mt-3 divide-y divide-line">
+            {yearMonths.map((item) => (
+              <li key={item} className="flex items-center justify-between py-2 text-sm">
+                <span>{formatMonthShort(item)}</span>
+                <span className="text-lg font-medium tabular-nums">{inr(monthCollection(book.days, item))}</span>
+              </li>
+            ))}
+          </ul>
+        ) : null}
+        {view !== "year" && shownDays.length === 0 ? <p className="mt-2 text-sm text-muted">No charges saved for this period yet.</p> : null}
         {sheetOnly ? (
           <div className="mt-3 max-w-xs">
             <MoneyField
@@ -67,9 +92,9 @@ function CollectionsPage() {
             />
           </div>
         ) : null}
-        {savedDays.length > 0 && !sheetOnly ? (
+        {view !== "year" && shownDays.length > 0 && !sheetOnly ? (
           <ul className="mt-3 divide-y divide-line">
-            {savedDays.map((day) => (
+            {shownDays.map((day) => (
               <li key={day.date} className="flex flex-wrap items-center justify-between gap-3 py-2 text-sm">
                 <span>{formatDay(day.date)}</span>
                 <span className="flex flex-wrap items-center gap-3">

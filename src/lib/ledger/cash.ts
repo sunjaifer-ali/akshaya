@@ -239,9 +239,10 @@ export function checkClose(
   if (missing.length > 0) {
     return { ...empty, last: opening, lastDate: last.date, movement, ...base, missing };
   }
-  const spanRows = [...closes.filter((item) => span.includes(item.date) && item.date !== row.date), row];
-  const creditGiven = spanRows.reduce((sum, item) => sum + creditGivenTotal(item), 0);
-  const creditPaid = spanRows.reduce((sum, item) => sum + creditPaidTotal(item), 0);
+  // Credit given, a repayment, an advance received, and a service from that advance
+  // belong only to their own date. They are not added again on later days.
+  const creditGiven = creditGivenTotal(row);
+  const creditPaid = creditPaidTotal(row);
   const advanceIn = typeof row.advanceIn === "number" ? Math.max(0, row.advanceIn) : Math.max(0, gap.advanceChange + (row.advanceServed ?? 0));
   const advanceServed = row.advanceServed ?? 0;
   const transfer = row.profitTaken ?? 0;

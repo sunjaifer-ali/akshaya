@@ -5,7 +5,7 @@ import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
 import { ResultDialog, type Result } from "@/components/result-dialog";
-import { addServiceEntry, removeServiceEntry, serviceDay, updateServiceEntry, type ServiceLine } from "@/lib/centre.functions";
+import { addAdvance, addCustomerMove, addServiceEntry, advanceDesk, customerCreditDesk, giveAdvanceService, removeServiceEntry, serviceDay, updateServiceEntry, type OpenAdvance, type OpenCredit, type ServiceLine } from "@/lib/centre.functions";
 import { inr } from "@/lib/format";
 import { pullSharedCloses } from "@/lib/ledger/share";
 import { useLedger } from "@/lib/ledger/store";
@@ -37,6 +37,7 @@ function CounterPage() {
   const [pending, setPending] = useState(false);
   const [picked, setPicked] = useState("");
   const [editing, setEditing] = useState<ServiceLine | null>(null);
+  const [panel, setPanel] = useState<"" | "customers" | "credit" | "advance">("");
   const day = date || today || "";
 
   useEffect(() => {
@@ -247,9 +248,23 @@ function CounterPage() {
         }}
       />
 
-      {role === "employee" ? (
+      <div className="mt-4 flex flex-wrap gap-2">
+        {(
+          [
+            ["customers", "Today's customers"],
+            ["credit", "Credit"],
+            ["advance", "Advances"],
+          ] as const
+        ).map(([id, label]) => (
+          <Button key={id} type="button" variant={panel === id ? "primary" : "secondary"} onClick={() => setPanel(panel === id ? "" : id)}>
+            {label}
+          </Button>
+        ))}
+      </div>
+
+      {panel === "customers" && role === "employee" ? (
         <section className="mt-4 rounded-xl border border-line bg-surface p-5">
-          <h2 className="font-display text-2xl">Your customers</h2>
+          <h2 className="font-display text-2xl">Today's customers</h2>
           {lines.length === 0 ? <p className="mt-2 text-sm text-muted">Nothing entered for this day.</p> : null}
           <CustomerLines
             lines={lines}
@@ -264,9 +279,10 @@ function CounterPage() {
             locked={closed}
           />
         </section>
-      ) : (
+      ) : null}
+      {panel === "customers" && role !== "employee" ? (
         <section className="mt-4 rounded-xl border border-line bg-surface p-5">
-          <h2 className="font-display text-2xl">By person</h2>
+          <h2 className="font-display text-2xl">Today's customers</h2>
           {byStaff.size === 0 ? <p className="mt-2 text-sm text-muted">Nothing entered for this day.</p> : null}
           <ul className="mt-2 divide-y divide-line">
             {[...byStaff.entries()].map(([name, value]) => {
@@ -306,7 +322,9 @@ function CounterPage() {
             })}
           </ul>
         </section>
-      )}
+      ) : null}
+      {panel === "credit" ? <CounterCredit month={(day || today).slice(0, 7)} onResult={setResult} /> : null}
+      {panel === "advance" ? <CounterAdvance onResult={setResult} /> : null}
       <ResultDialog result={result} onClose={() => setResult(null)} />
     </div>
   );
@@ -531,5 +549,155 @@ function GpaySplitDialog({
         </Button>
       </div>
     </Modal>
+  );
+}
+
+function CounterCredit({ month, onResult }: { month: string; onResult: (result: Result) => void }) {
+  const [open, setOpen] = useState<OpenCredit[]>([]);
+  const [customer, setCustomer] = useState("");
+  const [mobile, setMobile] = useState("");
+  const [amount, setAmount] = useState("");
+  const [payFor, setPayFor] = useState("");
+  const [payAmount, setPayAmount] = useState("");
+  const [pending, setPending] = useState(false);
+
+  const load = () => {
+    if (!month) return;
+    void customerCreditDesk({ data: month })
+      .then((book) => setOpen(book.open))
+      .catch((error: unknown) => onResult({ ok: false, message: error instanceof Error ? error.message : "Credit did not open." }));
+  };
+  useRefresh(load, 15000, [month]);
+
+  return (
+    <section className="mt-4 rounded-xl border border-line bg-surface p-5">
+      <h2 className="font-display text-2xl">Credit</h2>
+      <form
+        className="mt-3 grid gap-3 sm:grid-cols-2"
+        onSubmit={(event) => {
+          event.preventDefault();
+          setPending(true);
+          void addCustomerMove({ data: { kind: "credit", customer, mobile, amount: Number(amount) } })
+            .then(() => {
+              setCustomer("");
+              setMobile("");
+              setAmount("");
+              onResult({ ok: true, message: "Credit saved." });
+              load();
+            })
+            .catch((error: unknown) => onResult({ ok: false, message: error instanceof Error ? error.message : "Credit was not saved." }))
+            .finally(() => setPending(false));
+        }}
+      >
+        <input aria-label="Credit customer" className="h-11 rounded-sm border border-line bg-bg px-3" placeholder="Customer" value={customer} onChange={(event) => setCustomer(event.target.value)} />
+        <input aria-label="Credit mobile" inputMode="numeric" className="h-11 rounded-sm border border-line bg-bg px-3" placeholder="Mobile" value={mobile} onChange={(event) => setMobile(event.target.value)} />
+        <input aria-label="Credit amount" inputMode="numeric" className="h-11 rounded-sm border border-line bg-bg px-3" placeholder="Whole bill" value={amount} onChange={(event) => setAmount(event.target.value)} />
+        <Button type="submit" disabled={pending}>Add credit</Button>
+      </form>
+      {open.length === 0 ? <p className="mt-3 text-sm text-muted">No open credit.</p> : null}
+      <ul className="mt-2 divide-y divide-line">
+        {open.map((line) => (
+          <li key={`${line.customer}-${line.mobile}`} className="py-3 text-sm">
+            <div className="flex items-center justify-between gap-3">
+              <span>
+                {line.customer}
+                <span className="mt-0.5 block text-xs text-faint">{line.mobile || "No mobile"} · {inr(line.balance)}</span>
+              </span>
+              <Button size="sm" variant="secondary" onClick={() => setPayFor(payFor === line.customer ? "" : line.customer)}>Repay</Button>
+            </div>
+            {payFor === line.customer ? (
+              <form
+                className="mt-2 flex gap-2"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  void addCustomerMove({ data: { kind: "debit", customer: line.customer, mobile: line.mobile, amount: Number(payAmount) } })
+                    .then(() => {
+                      setPayAmount("");
+                      setPayFor("");
+                      onResult({ ok: true, message: "Credit repayment saved." });
+                      load();
+                    })
+                    .catch((error: unknown) => onResult({ ok: false, message: error instanceof Error ? error.message : "Repayment was not saved." }));
+                }}
+              >
+                <input aria-label="Repay amount" inputMode="numeric" className="h-11 flex-1 rounded-sm border border-line bg-bg px-3" value={payAmount} onChange={(event) => setPayAmount(event.target.value)} />
+                <Button type="submit">Save</Button>
+              </form>
+            ) : null}
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+function CounterAdvance({ onResult }: { onResult: (result: Result) => void }) {
+  const [open, setOpen] = useState<OpenAdvance[]>([]);
+  const [customer, setCustomer] = useState("");
+  const [mobile, setMobile] = useState("");
+  const [service, setService] = useState("");
+  const [amount, setAmount] = useState("");
+  const [pending, setPending] = useState(false);
+
+  const load = () => {
+    void advanceDesk()
+      .then((book) => setOpen(book.open))
+      .catch((error: unknown) => onResult({ ok: false, message: error instanceof Error ? error.message : "Advances did not open." }));
+  };
+  useRefresh(load, 15000, []);
+
+  return (
+    <section className="mt-4 rounded-xl border border-line bg-surface p-5">
+      <h2 className="font-display text-2xl">Advances</h2>
+      <form
+        className="mt-3 grid gap-3 sm:grid-cols-2"
+        onSubmit={(event) => {
+          event.preventDefault();
+          setPending(true);
+          void addAdvance({ data: { customer, mobile, service, amount: Number(amount) } })
+            .then(() => {
+              setCustomer("");
+              setMobile("");
+              setService("");
+              setAmount("");
+              onResult({ ok: true, message: "Advance saved." });
+              load();
+            })
+            .catch((error: unknown) => onResult({ ok: false, message: error instanceof Error ? error.message : "Advance was not saved." }))
+            .finally(() => setPending(false));
+        }}
+      >
+        <input aria-label="Advance customer" className="h-11 rounded-sm border border-line bg-bg px-3" placeholder="Customer" value={customer} onChange={(event) => setCustomer(event.target.value)} />
+        <input aria-label="Advance mobile" inputMode="numeric" className="h-11 rounded-sm border border-line bg-bg px-3" placeholder="Mobile" value={mobile} onChange={(event) => setMobile(event.target.value)} />
+        <input aria-label="Advance service" className="h-11 rounded-sm border border-line bg-bg px-3" placeholder="Service" value={service} onChange={(event) => setService(event.target.value)} />
+        <input aria-label="Advance amount" inputMode="numeric" className="h-11 rounded-sm border border-line bg-bg px-3" placeholder="Amount" value={amount} onChange={(event) => setAmount(event.target.value)} />
+        <Button type="submit" disabled={pending}>Add advance</Button>
+      </form>
+      {open.length === 0 ? <p className="mt-3 text-sm text-muted">No open advance.</p> : null}
+      <ul className="mt-2 divide-y divide-line">
+        {open.map((line) => (
+          <li key={line.id} className="flex items-center justify-between gap-3 py-3 text-sm">
+            <span>
+              {line.customer}
+              <span className="mt-0.5 block text-xs text-faint">{line.service} · {inr(line.amount)}</span>
+            </span>
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => {
+                void giveAdvanceService({ data: { id: line.id, amount: line.amount } })
+                  .then(() => {
+                    onResult({ ok: true, message: "Service given from the advance." });
+                    load();
+                  })
+                  .catch((error: unknown) => onResult({ ok: false, message: error instanceof Error ? error.message : "The service was not saved." }));
+              }}
+            >
+              Service given
+            </Button>
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }

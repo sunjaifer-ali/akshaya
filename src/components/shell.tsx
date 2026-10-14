@@ -38,7 +38,7 @@ import { useMounted } from "@/lib/use-mounted";
 const NAV = [
   { to: "/", label: "Desk", icon: BookOpen, group: "Today", mobile: true },
   { to: "/counter", label: "Counter", icon: PenLine, group: "Today", mobile: true },
-  { to: "/gpay", label: "GPay", icon: Smartphone, group: "Today", mobile: false },
+  { to: "/gpay", label: "Personal GPay", icon: Smartphone, group: "Today", mobile: false },
   { to: "/payments", label: "Payments", icon: Banknote, group: "Today", mobile: true },
   { to: "/closing", label: "Closing", icon: Calculator, group: "Today", mobile: true },
   { to: "/credit", label: "Credit and advances", icon: ArrowLeftRight, group: "Today", mobile: true },
@@ -50,7 +50,7 @@ const NAV = [
   { to: "/leave", label: "Leave", icon: CalendarDays, group: "People", mobile: false },
   { to: "/centre", label: "Centre", icon: BarChart3, group: "Review", mobile: false },
   { to: "/reports", label: "Reports", icon: ClipboardList, group: "Review", mobile: false },
-  { to: "/note", label: "Note", icon: NotebookPen, group: "Review", mobile: false },
+  { to: "/note", label: "Notice board", icon: NotebookPen, group: "Review", mobile: false },
 ] as const;
 
 const GROUPS = ["Today", "Money", "People", "Review"] as const;
@@ -58,11 +58,11 @@ const GROUPS = ["Today", "Money", "People", "Review"] as const;
 const MORE_LABEL: Record<(typeof NAV)[number]["to"], string> = {
   "/": "Desk",
   "/counter": "Live counter",
-  "/gpay": "Personal GPay",
+  "/gpay": "Personal GPay Payments",
   "/payments": "Payments",
   "/credit": "Credit and advances",
   "/diary": "Diary",
-  "/note": "Month note",
+  "/note": "Notice board",
   "/collections": "Collections",
   "/closing": "Daily closing",
   "/salary": "Salary",
@@ -187,7 +187,10 @@ export function Shell({ children }: { children: ReactNode }) {
 
   const links =
     role === "employee"
-      ? NAV.filter((item) => item.to === "/counter" || item.to === "/payments" || item.to === "/credit" || item.to === "/diary" || item.to === "/note" || item.to === "/gpay")
+      ? [
+          ...NAV.filter((item) => item.to === "/counter" || item.to === "/payments" || item.to === "/diary" || item.to === "/note"),
+          ...NAV.filter((item) => item.to === "/gpay"),
+        ]
       : role === "closer"
         ? NAV.filter((item) => item.to === "/counter" || item.to === "/closing")
         : NAV.filter((item) => item.to !== "/payments");
@@ -227,7 +230,7 @@ export function Shell({ children }: { children: ReactNode }) {
         <div className="grid shrink-0 gap-1 border-t border-line bg-surface p-3">
           {role === "employee" || role === "closer" ? (
             <Button variant="ghost" className="w-full justify-start" onClick={() => setPasswordOpen(true)}>
-              Password
+              Change password
             </Button>
           ) : null}
           <UserButton hideSignOut />
@@ -282,7 +285,7 @@ export function Shell({ children }: { children: ReactNode }) {
           ) : (
             <div className="flex items-center gap-2">
               <Button variant="secondary" size="sm" onClick={() => setPasswordOpen(true)}>
-                Password
+                Change password
               </Button>
               <UserButton />
             </div>
@@ -327,7 +330,7 @@ export function Shell({ children }: { children: ReactNode }) {
               )}
             >
               <item.icon className="size-4" />
-              {item.label === "Collections" ? "Cash" : item.label}
+              {item.label === "Collections" ? "Cash" : item.label === "Personal GPay" ? "GPay" : item.label === "Notice board" ? "Notice" : item.label}
             </Link>
           ))}
           {role === "admin" ? (
