@@ -67,8 +67,6 @@ function CentrePage() {
   const pairedLast = paired.reduce((sum, row) => sum + (row.lastYearCompared ?? 0), 0);
   const growth = paired.length > 0 ? pairedCollection - pairedLast : null;
   const growthPct = pairedLast > 0 && growth != null ? (growth / pairedLast) * 100 : null;
-  const yearLast = visible.reduce((sum, row) => sum + (row.lastYear ?? 0), 0);
-  const yearLastKnown = visible.some((row) => row.lastYear != null);
 
   const chartRows = visible.map((row) => ({
     label: formatMonthShort(row.month),
@@ -111,7 +109,7 @@ function CentrePage() {
                           future ? "—" : row.salary,
                           future ? "—" : row.margin,
                           future ? "—" : pct(costPct(row)),
-                          row.lastYear ?? "—",
+                          row.lastYearCompared ?? "—",
                           row.collection > 0 ? row.growth ?? 0 : "—",
                           row.collection > 0 ? pct(row.growthPct) : "—",
                         ];
@@ -131,7 +129,7 @@ function CentrePage() {
         <Mini label="Net collection" value={inr(totals.collection)} />
         <Mini label="Expenses" value={inr(totals.expense + totals.salary)} />
         <Mini label="Margin" value={inr(totals.margin)} />
-        <Mini label="Growth" value={growth == null ? "—" : `${signedInr(growth)} · ${pct(growthPct)}`} />
+        <Mini label="Growth vs last year" value={growth == null ? "—" : `${signedInr(growth)} (${pct(growthPct)})`} />
       </section>
       <div className="no-print mt-4 flex flex-wrap items-center gap-2">
         {(["day", "month", "year"] as const).map((item) => (
@@ -207,7 +205,7 @@ function CentrePage() {
                   <Cell>{inr(row.salary)}</Cell>
                   <Cell tone={toneOf(row.margin)}>{inr(row.margin)}</Cell>
                   <Cell>{pct(costPct(row))}</Cell>
-                  <Cell>{row.lastYear == null ? "—" : inr(row.lastYear)}</Cell>
+                  <Cell>{row.lastYearCompared == null ? "—" : `${inr(row.lastYearCompared)}${row.lastYearPartial ? " so far" : ""}`}</Cell>
                   <Cell tone={toneOf(row.growth)}>{row.collection > 0 ? signedInr(row.growth) : "—"}</Cell>
                   <Cell tone={toneOf(row.growthPct)}>{row.collection > 0 ? pct(row.growthPct) : "—"}</Cell>
                 </tr>
@@ -219,7 +217,7 @@ function CentrePage() {
                 <Cell>{inr(totals.salary)}</Cell>
                 <Cell tone={toneOf(totals.margin)}>{inr(totals.margin)}</Cell>
                 <Cell>{pct(totals.collection > 0 ? ((totals.expense + totals.salary) / totals.collection) * 100 : null)}</Cell>
-                <Cell>{yearLastKnown ? inr(yearLast) : "—"}</Cell>
+                <Cell>{pairedLast > 0 ? inr(pairedLast) : "—"}</Cell>
                 <Cell tone={toneOf(growth)}>{growth == null ? "—" : signedInr(growth)}</Cell>
                 <Cell tone={toneOf(growthPct)}>{pct(growthPct)}</Cell>
               </tr>

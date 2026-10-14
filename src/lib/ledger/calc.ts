@@ -13,10 +13,18 @@ export function monthDays(days: CollectionDay[], month: string): CollectionDay[]
 }
 
 export function monthCollection(days: CollectionDay[], month: string): number {
+  return collectionRows(days, month).reduce((sum, day) => sum + day.amount, 0);
+}
+
+/** Daily counter rows win. A month-total sheet is used only when that month has no daily rows. */
+function collectionRows(days: CollectionDay[], month: string): CollectionDay[] {
   const rows = monthDays(days, month);
   const daily = rows.filter((day) => !/centre sheet|month total/i.test(day.note));
-  const source = daily.some((day) => day.amount > 0) ? daily : rows;
-  return source.reduce((sum, day) => sum + day.amount, 0);
+  return daily.some((day) => day.amount > 0) ? daily : rows;
+}
+
+function isLump(rows: CollectionDay[]): boolean {
+  return rows.length > 0 && rows.every((day) => /centre sheet|month total/i.test(day.note));
 }
 
 export function daysEntered(days: CollectionDay[], month: string): number {
@@ -175,9 +183,12 @@ export function lastYearFigure(
   month: string,
   asOf = "",
 ): { amount: number | null; source: "book" | "entered" | "none"; partial: boolean } {
-  const prior = lastYearMonth(month);
+  const priorMonth = lastYearMonth(month);
   const inProgress = Boolean(asOf) && asOf.slice(0, 7) === month;
-  const bookDays = monthDays(days, prior).filter((day) => !inProgress || day.date.slice(8) <= asOf.slice(8));
+  const rows = collectionRows(days, priorMonth);
+  const lump = isLump(rows);
+  // A running month is compared with the same dates last year. A single month-total stays whole and is scaled later.
+  const bookDays = !inProgress || lump ? rows : rows.filter((day) => day.date.slice(8) <= asOf.slice(8));
   const book = bookDays.reduce((sum, day) => sum + day.amount, 0);
   if (book > 0) return { amount: book, source: "book", partial: inProgress };
   if (Object.prototype.hasOwnProperty.call(lyOverrides, month)) {

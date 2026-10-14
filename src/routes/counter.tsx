@@ -637,6 +637,7 @@ function CounterAdvance({ onResult }: { onResult: (result: Result) => void }) {
   const [mobile, setMobile] = useState("");
   const [service, setService] = useState("");
   const [amount, setAmount] = useState("");
+  const [part, setPart] = useState<Record<string, string>>({});
   const [pending, setPending] = useState(false);
 
   const load = () => {
@@ -676,25 +677,46 @@ function CounterAdvance({ onResult }: { onResult: (result: Result) => void }) {
       {open.length === 0 ? <p className="mt-3 text-sm text-muted">No open advance.</p> : null}
       <ul className="mt-2 divide-y divide-line">
         {open.map((line) => (
-          <li key={line.id} className="flex items-center justify-between gap-3 py-3 text-sm">
-            <span>
-              {line.customer}
-              <span className="mt-0.5 block text-xs text-faint">{line.service} · {inr(line.amount)}</span>
-            </span>
-            <Button
-              size="sm"
-              variant="secondary"
-              onClick={() => {
-                void giveAdvanceService({ data: { id: line.id, amount: line.amount } })
-                  .then(() => {
-                    onResult({ ok: true, message: "Service given from the advance." });
-                    load();
-                  })
-                  .catch((error: unknown) => onResult({ ok: false, message: error instanceof Error ? error.message : "The service was not saved." }));
-              }}
-            >
-              Service given
-            </Button>
+          <li key={line.id} className="py-3 text-sm">
+            <div className="flex items-start justify-between gap-3">
+              <span>
+                {line.customer}
+                <span className="mt-0.5 block text-xs text-faint">{line.service} · {inr(line.amount)}</span>
+              </span>
+            </div>
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <input
+                aria-label={`Amount served for ${line.customer}`}
+                inputMode="numeric"
+                placeholder="Part or full"
+                className="h-11 w-36 rounded-sm border border-line bg-bg px-3 text-base"
+                value={part[line.id] ?? ""}
+                onChange={(event) => setPart((current) => ({ ...current, [line.id]: event.target.value.replace(/[^\d]/g, "") }))}
+              />
+              <Button
+                size="sm"
+                disabled={pending}
+                onClick={() => {
+                  const served = Number(part[line.id] || 0);
+                  if (!served || served > line.amount) {
+                    onResult({ ok: false, message: served > line.amount ? "That is more than the advance." : "Enter the amount done. The balance stays in advance." });
+                    return;
+                  }
+                  setPending(true);
+                  void giveAdvanceService({ data: { id: line.id, amount: served } })
+                    .then((saved) => {
+                      const rest = saved.left > 0 ? ` ${inr(saved.left)} still in advance.` : "";
+                      onResult({ ok: true, message: `Service given.${rest}` });
+                      setPart((current) => ({ ...current, [line.id]: "" }));
+                      load();
+                    })
+                    .catch((error: unknown) => onResult({ ok: false, message: error instanceof Error ? error.message : "The service was not saved." }))
+                    .finally(() => setPending(false));
+                }}
+              >
+                Service given
+              </Button>
+            </div>
           </li>
         ))}
       </ul>

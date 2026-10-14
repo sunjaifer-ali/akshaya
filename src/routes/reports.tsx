@@ -337,7 +337,7 @@ async function buildReportWorkbook(
               totalCost,
               row.margin,
               started ? pct((totalCost / row.collection) * 100) : "—",
-              row.lastYear ?? "—",
+              row.lastYearCompared ?? "—",
               started ? row.growth ?? 0 : "—",
               started ? pct(row.growthPct) : "—",
             ];
@@ -440,7 +440,7 @@ function CentreStatement({ rows }: { rows: CentreSnapshot[] }) {
                 <Cell>{inr(totalCost)}</Cell>
                 <Cell tone={toneOf(row.margin)}>{inr(row.margin)}</Cell>
                 <Cell>{started ? pct((totalCost / row.collection) * 100) : "—"}</Cell>
-                <Cell>{row.lastYear == null ? "—" : inr(row.lastYear)}</Cell>
+                <Cell>{row.lastYearCompared == null ? "—" : inr(row.lastYearCompared)}</Cell>
                 <Cell tone={toneOf(row.growth)}>{started ? signedInr(row.growth) : "—"}</Cell>
                 <Cell tone={toneOf(row.growthPct)}>{started ? pct(row.growthPct) : "—"}</Cell>
               </tr>
