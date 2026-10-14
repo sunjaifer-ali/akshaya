@@ -1,0 +1,535 @@
+import { createFileRoute } from "@tanstack/react-router";
+import { useEffect, useState } from "react";
+import { useRefresh } from "@/lib/use-refresh";
+import { PageHeader } from "@/components/page-header";
+import { Button } from "@/components/ui/button";
+import { Modal } from "@/components/ui/modal";
+import { ResultDialog, type Result } from "@/components/result-dialog";
+import { addServiceEntry, removeServiceEntry, serviceDay, updateServiceEntry, type ServiceLine } from "@/lib/centre.functions";
+import { inr } from "@/lib/format";
+import { pullSharedCloses } from "@/lib/ledger/share";
+import { useLedger } from "@/lib/ledger/store";
+import { useTodayKey } from "@/lib/use-today";
+
+const SERVICES = ["Aadhaar", "Certificate", "E-district", "PSC", "Passport", "PAN", "Ration card", "Utility bill", "Photocopy"];
+
+export const Route = createFileRoute("/counter")({
+  component: CounterPage,
+});
+
+function CounterPage() {
+  const today = useTodayKey();
+  const book = useLedger();
+  const [date, setDate] = useState(today || "");
+  const [role, setRole] = useState<"admin" | "employee" | "closer">("employee");
+  const [total, setTotal] = useState(0);
+  const [lines, setLines] = useState<ServiceLine[]>([]);
+  const [closed, setClosed] = useState(false);
+  const [service, setService] = useState("");
+  const [customer, setCustomer] = useState("");
+  const [mobile, setMobile] = useState("");
+  const [amount, setAmount] = useState("");
+  const [personalGpay, setPersonalGpay] = useState(false);
+  const [department, setDepartment] = useState("");
+  const [askGpay, setAskGpay] = useState(false);
+  const [notice, setNotice] = useState("");
+  const [result, setResult] = useState<Result | null>(null);
+  const [pending, setPending] = useState(false);
+  const [picked, setPicked] = useState("");
+  const [editing, setEditing] = useState<ServiceLine | null>(null);
+  const day = date || today || "";
+
+  useEffect(() => {
+    if (today) setDate((current) => current || today);
+  }, [today]);
+
+  const reload = () =>
+    serviceDay({ data: day || today }).then((next) => {
+      setRole(next.role);
+      setTotal(next.total);
+      setLines(next.lines);
+      setClosed(Boolean(next.closed));
+      return pullSharedCloses();
+    });
+
+  useRefresh(() => {
+    if (!day) return;
+    return serviceDay({ data: day })
+      .then((next) => {
+        setRole(next.role);
+        setTotal(next.total);
+        setLines(next.lines);
+        setClosed(Boolean(next.closed));
+      })
+      .catch((error: unknown) => setNotice(error instanceof Error ? error.message : "The counter did not open."));
+  }, 15000, [day]);
+
+  const save = () => {
+    setPending(true);
+    setNotice("");
+    void addServiceEntry({
+      data: {
+        service,
+        customer,
+        mobile,
+        amount: Number(amount),
+        personalGpay,
+        department: personalGpay ? Number(department || 0) : 0,
+        bankDepartment: 0,
+      },
+    })
+      .then(() => {
+        setService("");
+        setCustomer("");
+        setMobile("");
+        setAmount("");
+        setPersonalGpay(false);
+        setDepartment("");
+        setNotice("");
+        setEditing(null);
+        setResult({ ok: true, message: "Charge successfully saved." });
+        return reload();
+      })
+      .catch((error: unknown) => {
+        setResult({ ok: false, message: error instanceof Error ? error.message : "Charge not saved." });
+      })
+      .finally(() => setPending(false));
+  };
+
+  const byStaff = new Map<string, number>();
+  for (const line of lines) byStaff.set(line.staff, (byStaff.get(line.staff) ?? 0) + line.amount);
+  const names = new Set(book.employees.map((employee) => employee.name.trim().toLowerCase()));
+  const unmatched = [...byStaff.keys()].filter((name) => !names.has(name.trim().toLowerCase()));
+  const gpayLines = lines.filter((line) => line.personalGpay);
+  const gpayTotal = gpayLines.reduce((sum, line) => sum + line.amount + (line.department || 0), 0);
+  const gpayService = gpayLines.reduce((sum, line) => sum + line.amount, 0);
+  const gpayDepartment = gpayLines.reduce((sum, line) => sum + (line.department || 0), 0);
+
+  return (
+    <div>
+      <PageHeader
+        kicker="COUNTER"
+        title={role === "employee" ? "Service charge" : "Counter"}
+        actions={
+          role === "employee" ? null : (
+            <input
+              type="date"
+              aria-label="Counter date"
+              className="h-11 rounded-sm border border-line bg-bg px-3 text-base outline-none focus:border-accent"
+              value={day}
+              onChange={(event) => {
+                if (event.target.value) setDate(event.target.value);
+              }}
+            />
+          )
+        }
+      />
+
+      <section className="rounded-xl border border-line bg-surface p-5">
+        <p className="text-xs font-semibold tracking-widest text-faint">{role === "employee" ? "YOUR TOTAL" : day === today ? "ENTERED TODAY" : "ENTERED"}</p>
+        <p className="mt-1 font-display text-4xl tabular-nums">{inr(total)}</p>
+        {lines.length > 0 || gpayLines.length > 0 ? (
+          <p className="mt-2 text-base tabular-nums">
+            {lines.length > 0 ? `${lines.length}` : ""}
+            {gpayLines.length > 0 ? `${lines.length > 0 ? " · " : ""}Personal GPay ${inr(gpayTotal)}` : ""}
+          </p>
+        ) : null}
+        {gpayLines.length > 0 ? (
+          <p className="mt-1 text-base tabular-nums">
+            Service {inr(gpayService)} · Department {inr(gpayDepartment)}
+          </p>
+        ) : null}
+        {role === "admin" && unmatched.length > 0 ? (
+          <p className="mt-2 text-sm text-warn">
+            {unmatched.join(", ")} is not a staff name, so that amount is in the centre total only. Use the same name as on Salary.
+          </p>
+        ) : null}
+      </section>
+
+      {role === "employee" && closed ? (
+        <section className="mt-4 rounded-xl border border-line bg-surface p-5">
+          <h2 className="font-display text-2xl">Day closed</h2>
+          <p className="mt-1 text-sm text-muted">No more charges can be entered today. Tomorrow starts fresh.</p>
+        </section>
+      ) : role === "employee" || (role === "admin" && day === today) ? (
+        <form
+          className="mt-4 grid gap-3 rounded-xl border border-line bg-surface p-5 sm:grid-cols-2"
+          onSubmit={(event) => {
+            event.preventDefault();
+            save();
+          }}
+        >
+          <label className="block text-sm">
+            <span className="mb-1 block text-muted">Service</span>
+            <input
+              list="akshaya-services"
+              className="h-11 w-full rounded-sm border border-line bg-bg px-3 text-base outline-none focus:border-accent"
+              value={service}
+              onChange={(event) => setService(event.target.value)}
+            />
+            <datalist id="akshaya-services">
+              {SERVICES.map((item) => (
+                <option key={item} value={item} />
+              ))}
+            </datalist>
+          </label>
+          <label className="block text-sm">
+            <span className="mb-1 block text-muted">Customer name</span>
+            <input
+              className="h-11 w-full rounded-sm border border-line bg-bg px-3 text-base outline-none focus:border-accent"
+              value={customer}
+              onChange={(event) => setCustomer(event.target.value)}
+            />
+          </label>
+          <label className="block text-sm">
+            <span className="mb-1 block text-muted">Mobile, if any</span>
+            <input
+              inputMode="numeric"
+              className="h-11 w-full rounded-sm border border-line bg-bg px-3 text-base outline-none focus:border-accent"
+              value={mobile}
+              onChange={(event) => setMobile(event.target.value)}
+            />
+          </label>
+          <label className="block text-sm">
+            <span className="mb-1 block text-muted">Service charge</span>
+            <input
+              inputMode="numeric"
+              className="h-11 w-full rounded-sm border border-line bg-bg px-3 text-base outline-none focus:border-accent"
+              value={amount}
+              onChange={(event) => setAmount(event.target.value)}
+            />
+          </label>
+          <label className="flex min-h-11 items-center gap-2 text-sm sm:col-span-2">
+            <input
+              type="checkbox"
+              checked={personalGpay}
+              onChange={(event) => {
+                if (event.target.checked) setAskGpay(true);
+                else {
+                  setPersonalGpay(false);
+                  setDepartment("");
+                }
+              }}
+            />
+            Customer paid GPay to a personal number, not the Akshaya account
+          </label>
+          {personalGpay ? (
+            <div className="rounded-lg border border-line bg-bg px-3 py-2 text-sm sm:col-span-2">
+              <p>Total received {inr(Number(amount || 0) + Number(department || 0))}</p>
+              <p className="text-muted">
+                Service charge {inr(Number(amount || 0))} · Department payment {inr(Number(department || 0))}
+              </p>
+              <Button type="button" size="sm" variant="secondary" className="mt-2" onClick={() => setAskGpay(true)}>
+                Change the split
+              </Button>
+            </div>
+          ) : null}
+          <div className="sm:col-span-2">
+            <Button type="submit" disabled={pending}>
+              {pending ? "Saving…" : "Add charge"}
+            </Button>
+          </div>
+        </form>
+      ) : role === "admin" ? (
+        <p className="mt-4 text-sm text-muted">Open today to enter a charge. This date is only for viewing.</p>
+      ) : null}
+      {notice ? <p className="mt-3 text-sm text-muted">{notice}</p> : null}
+      <GpaySplitDialog
+        open={askGpay}
+        serviceCharge={amount}
+        department={department}
+        onOpenChange={setAskGpay}
+        onConfirm={(charge, part) => {
+          setAmount(String(charge));
+          setDepartment(String(part));
+          setPersonalGpay(true);
+          setAskGpay(false);
+        }}
+      />
+
+      {role === "employee" ? (
+        <section className="mt-4 rounded-xl border border-line bg-surface p-5">
+          <h2 className="font-display text-2xl">Your customers</h2>
+          {lines.length === 0 ? <p className="mt-2 text-sm text-muted">Nothing entered for this day.</p> : null}
+          <CustomerLines
+            lines={lines}
+            editing={editing}
+            onEdit={setEditing}
+            onResult={(next) => {
+              setResult(next);
+              setEditing(null);
+              void reload();
+            }}
+            canDelete={false}
+            locked={closed}
+          />
+        </section>
+      ) : (
+        <section className="mt-4 rounded-xl border border-line bg-surface p-5">
+          <h2 className="font-display text-2xl">By person</h2>
+          {byStaff.size === 0 ? <p className="mt-2 text-sm text-muted">Nothing entered for this day.</p> : null}
+          <ul className="mt-2 divide-y divide-line">
+            {[...byStaff.entries()].map(([name, value]) => {
+              const count = lines.filter((line) => line.staff === name).length;
+              const open = picked === name;
+              return (
+                <li key={name}>
+                  <button
+                    type="button"
+                    className="flex w-full items-center justify-between py-2 text-left text-sm"
+                    onClick={() => {
+                      setPicked(open ? "" : name);
+                      setEditing(null);
+                    }}
+                  >
+                    <span className="font-medium">{name}</span>
+                    <span className="tabular-nums text-muted">
+                      {count} · {inr(value)}
+                    </span>
+                  </button>
+                  {open ? (
+                    <CustomerLines
+                      lines={lines.filter((line) => line.staff === name)}
+                      editing={editing}
+                      onEdit={setEditing}
+                      onResult={(next) => {
+                        setResult(next);
+                        setEditing(null);
+                        void reload();
+                      }}
+                      canDelete={role === "admin"}
+                      locked={role !== "admin" && closed}
+                    />
+                  ) : null}
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+      )}
+      <ResultDialog result={result} onClose={() => setResult(null)} />
+    </div>
+  );
+}
+
+function CustomerLines({
+  lines,
+  editing,
+  onEdit,
+  onResult,
+  canDelete,
+  locked = false,
+}: {
+  lines: ServiceLine[];
+  editing: ServiceLine | null;
+  onEdit: (line: ServiceLine | null) => void;
+  onResult: (result: Result) => void;
+  canDelete: boolean;
+  locked?: boolean;
+}) {
+  return (
+    <ul className="mb-2 grid gap-2">
+      {lines.map((line) =>
+        editing?.id === line.id ? (
+          <EditCharge key={line.id} line={line} onClose={() => onEdit(null)} onResult={onResult} />
+        ) : (
+          <li key={line.id} className="rounded-lg border border-line px-3 py-2 text-sm">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="font-medium">{line.customer}</p>
+                <p className="text-xs text-faint">
+                  {line.service}
+                  {line.mobile ? ` · ${line.mobile}` : ""}
+                  {line.personalGpay
+                    ? ` · Personal GPay · total ${inr(line.amount + (line.department || 0))} · service ${inr(line.amount)} · department ${inr(line.department || 0)}`
+                    : ""}
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="tabular-nums">{inr(line.amount)}</span>
+                {locked ? null : (
+                  <Button size="sm" variant="secondary" onClick={() => onEdit(line)}>
+                    Edit
+                  </Button>
+                )}
+                {canDelete ? (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => {
+                      void removeServiceEntry({ data: line.id })
+                        .then(() => onResult({ ok: true, message: "Charge successfully deleted." }))
+                        .catch((error: unknown) => onResult({ ok: false, message: error instanceof Error ? error.message : "Charge not deleted." }));
+                    }}
+                  >
+                    Delete
+                  </Button>
+                ) : null}
+              </div>
+            </div>
+          </li>
+        ),
+      )}
+    </ul>
+  );
+}
+
+function EditCharge({ line, onClose, onResult }: { line: ServiceLine; onClose: () => void; onResult: (result: Result) => void }) {
+  const [service, setService] = useState(line.service);
+  const [customer, setCustomer] = useState(line.customer);
+  const [mobile, setMobile] = useState(line.mobile);
+  const [amount, setAmount] = useState(String(line.amount));
+  const [personalGpay, setPersonalGpay] = useState(Boolean(line.personalGpay));
+  const [department, setDepartment] = useState(line.department ? String(line.department) : "");
+  const [askGpay, setAskGpay] = useState(false);
+  const [pending, setPending] = useState(false);
+  return (
+    <li className="rounded-lg border border-line p-3">
+      <form
+        className="grid gap-2 sm:grid-cols-2"
+        onSubmit={(event) => {
+          event.preventDefault();
+          setPending(true);
+          void updateServiceEntry({
+            data: {
+              id: line.id,
+              service,
+              customer,
+              mobile,
+              amount: Number(amount),
+              personalGpay,
+              department: personalGpay ? Number(department || 0) : 0,
+              bankDepartment: line.bankDepartment || 0,
+            },
+          })
+            .then(() => onResult({ ok: true, message: "Charge successfully updated." }))
+            .catch((caught: unknown) => {
+              onResult({ ok: false, message: caught instanceof Error ? caught.message : "Charge not saved." });
+              setPending(false);
+            });
+        }}
+      >
+        <input className="h-11 rounded-sm border border-line bg-bg px-3 text-base outline-none focus:border-accent" value={service} onChange={(event) => setService(event.target.value)} aria-label="Service" />
+        <input className="h-11 rounded-sm border border-line bg-bg px-3 text-base outline-none focus:border-accent" value={customer} onChange={(event) => setCustomer(event.target.value)} aria-label="Customer" />
+        <input className="h-11 rounded-sm border border-line bg-bg px-3 text-base outline-none focus:border-accent" value={mobile} onChange={(event) => setMobile(event.target.value)} aria-label="Mobile" />
+        <input className="h-11 rounded-sm border border-line bg-bg px-3 text-base outline-none focus:border-accent" value={amount} onChange={(event) => setAmount(event.target.value)} aria-label="Service charge" inputMode="numeric" />
+        <label className="flex min-h-11 items-center gap-2 text-sm sm:col-span-2">
+          <input
+            type="checkbox"
+            checked={personalGpay}
+            onChange={(event) => {
+              if (event.target.checked) setAskGpay(true);
+              else {
+                setPersonalGpay(false);
+                setDepartment("");
+              }
+            }}
+          />
+          GPay to a personal number
+        </label>
+        {personalGpay ? (
+          <div className="text-sm sm:col-span-2">
+            <p>
+              Total {inr(Number(amount || 0) + Number(department || 0))} · Service {inr(Number(amount || 0))} · Department {inr(Number(department || 0))}
+            </p>
+            <Button type="button" size="sm" variant="secondary" className="mt-2" onClick={() => setAskGpay(true)}>
+              Change the split
+            </Button>
+          </div>
+        ) : null}
+        <div className="flex gap-2 sm:col-span-2">
+          <Button type="submit" disabled={pending}>{pending ? "Saving…" : "Save"}</Button>
+          <Button type="button" variant="secondary" onClick={onClose}>Cancel</Button>
+        </div>
+      </form>
+      <GpaySplitDialog
+        open={askGpay}
+        serviceCharge={amount}
+        department={department}
+        onOpenChange={setAskGpay}
+        onConfirm={(charge, part) => {
+          setAmount(String(charge));
+          setDepartment(String(part));
+          setPersonalGpay(true);
+          setAskGpay(false);
+        }}
+      />
+    </li>
+  );
+}
+
+function GpaySplitDialog({
+  open,
+  serviceCharge,
+  department,
+  onOpenChange,
+  onConfirm,
+}: {
+  open: boolean;
+  serviceCharge: string;
+  department: string;
+  onOpenChange: (open: boolean) => void;
+  onConfirm: (serviceCharge: number, department: number) => void;
+}) {
+  const [total, setTotal] = useState("");
+  const [service, setService] = useState("");
+  const [dept, setDept] = useState("");
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (!open) return;
+    const charge = Math.round(Number(serviceCharge) || 0);
+    const part = Math.round(Number(department) || 0);
+    setService(charge > 0 ? String(charge) : "");
+    setDept(part > 0 ? String(part) : "");
+    setTotal(charge + part > 0 ? String(charge + part) : "");
+    setError("");
+  }, [open, serviceCharge, department]);
+
+  const received = Math.round(Number(total) || 0);
+  const charge = Math.round(Number(service) || 0);
+  const part = Math.round(Number(dept) || 0);
+  const matches = received > 0 && charge > 0 && part >= 0 && charge + part === received;
+
+  return (
+    <Modal
+      open={open}
+      onOpenChange={onOpenChange}
+      title="Personal GPay"
+      description="Enter the three amounts separately. The total must be the service charge plus the department payment."
+    >
+      <div className="grid gap-3">
+        <label className="block text-sm">
+          <span className="mb-1 block text-muted">Total received on the personal number</span>
+          <input inputMode="numeric" className="h-11 w-full rounded-sm border border-line bg-bg px-3 text-base outline-none focus:border-accent" value={total} onChange={(event) => setTotal(event.target.value)} />
+        </label>
+        <label className="block text-sm">
+          <span className="mb-1 block text-muted">Service charge</span>
+          <input inputMode="numeric" className="h-11 w-full rounded-sm border border-line bg-bg px-3 text-base outline-none focus:border-accent" value={service} onChange={(event) => setService(event.target.value)} />
+        </label>
+        <label className="block text-sm">
+          <span className="mb-1 block text-muted">Department payment</span>
+          <input inputMode="numeric" className="h-11 w-full rounded-sm border border-line bg-bg px-3 text-base outline-none focus:border-accent" value={dept} onChange={(event) => setDept(event.target.value)} />
+        </label>
+        <p className={matches ? "text-sm text-muted" : "text-sm text-bad"}>
+          {charge + part === received
+            ? `Service ${inr(charge)} + department ${inr(part)} = total ${inr(received)}.`
+            : `These do not match. Service ${inr(charge)} + department ${inr(part)} is ${inr(charge + part)}, not ${inr(received)}.`}
+        </p>
+        {error ? <p className="text-sm text-bad">{error}</p> : null}
+        <Button
+          type="button"
+          onClick={() => {
+            if (!matches) {
+              setError("Enter the total, the service charge, and the department payment so they add up.");
+              return;
+            }
+            onConfirm(charge, part);
+          }}
+        >
+          Use these amounts
+        </Button>
+      </div>
+    </Modal>
+  );
+}
