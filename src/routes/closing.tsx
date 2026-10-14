@@ -191,96 +191,6 @@ function ClosingPage() {
         {accepted ? " · Accepted" : ""}
       </p>
 
-      <div className="no-print mb-4 flex flex-wrap gap-2">
-        {locked ? (
-          <p className="text-sm text-muted">Accepted. Only the admin can change this closing.</p>
-        ) : editing ? (
-          <Button
-            onClick={() => {
-              const closer = user?.displayName?.trim() || "Admin";
-              const next = { ...row, date, countedBy: closer, accepted: role === "admin" ? Boolean(saved?.accepted) : false };
-              book.setCashClose(next);
-              setEditing(false);
-              setResult({ ok: true, message: `Closing for ${formatDay(date)} successfully saved.` });
-              void pushClose(date, next).catch((error: unknown) => {
-                setResult({ ok: false, message: error instanceof Error ? error.message : "Saved on this browser, but not shared." });
-              });
-            }}
-          >
-            Save
-          </Button>
-        ) : (
-          <Button
-            variant="secondary"
-            onClick={() => {
-              setDraft(saved ?? blank(date, 0, counterName(book.employees, user?.displayName)));
-              setEditing(true);
-              setNotice("");
-            }}
-          >
-            Edit
-          </Button>
-        )}
-        {role === "admin" && saved && !editing ? (
-          <Button
-            variant="secondary"
-            onClick={() => {
-              const next = {
-                ...saved,
-                creditGiven: liveCredit?.given ?? saved.creditGiven,
-                creditPaid: liveCredit?.paid ?? saved.creditPaid,
-                credits: liveCredit?.unpaid ?? saved.credits,
-                accepted: !accepted,
-              };
-              book.setCashClose(next);
-              setResult({
-                ok: true,
-                message: next.accepted ? `${formatDay(date)} accepted. Staff cannot change it.` : `${formatDay(date)} opened again.`,
-              });
-              void pushClose(date, next).catch((error: unknown) => {
-                setResult({ ok: false, message: error instanceof Error ? error.message : "Saved on this browser, but not shared." });
-              });
-            }}
-          >
-            {accepted ? "Open again" : "Accept"}
-          </Button>
-        ) : null}
-        {locked ? null : confirmClear ? (
-          <>
-            <Button
-              variant="danger"
-              onClick={() => {
-                book.clearCashClose(date);
-                void pushClose(date, null).catch(() => undefined);
-                setDraft(blank(date, 0, counterName(book.employees, user?.displayName)));
-                setEditing(true);
-                setConfirmClear(false);
-                setResult({ ok: true, message: `Closing for ${formatDay(date)} successfully cleared.` });
-              }}
-            >
-              Clear {formatDay(date)}
-            </Button>
-            <Button variant="secondary" onClick={() => setConfirmClear(false)}>
-              Keep
-            </Button>
-          </>
-        ) : (
-          <Button variant="ghost" onClick={() => setConfirmClear(true)}>
-            Clear
-          </Button>
-        )}
-        <Button variant="secondary" onClick={() => window.print()}>
-          Print
-        </Button>
-      </div>
-      {notice ? <p className="no-print mb-4 text-sm text-muted">{notice}</p> : null}
-      <ResultDialog result={result} onClose={() => setResult(null)} />
-
-      <section className="mb-4 grid gap-3 sm:grid-cols-2">
-        <AccountTile label="Short" count={shorts.length} total={shortTotal} tone="bad" />
-        <AccountTile label="Excess" count={excesses.length} total={excessTotal} tone="warn" />
-      </section>
-
       <section className="rounded-xl border border-line bg-surface p-5">
         <h2 className="font-medium">Notes</h2>
         <ul className="mt-2 divide-y divide-line">
@@ -512,7 +422,7 @@ function CheckCard({
   const shown = hold ? { ...check, difference: null, unfixed: null } : check;
 
   return (
-    <section className="mt-4 rounded-xl border border-line bg-surface p-5">
+    <section className="mx-auto mt-4 max-w-lg rounded-xl border border-line bg-surface p-5 text-center">
       <p className="text-xs font-semibold tracking-widest text-faint">DIFFERENCE</p>
       <p
         className={cn(
@@ -523,7 +433,7 @@ function CheckCard({
         {diffLabel(shown.difference)}
       </p>
       <h2 className="mt-5 font-medium">Put together</h2>
-      <dl className="mt-3 grid gap-2 text-base">
+      <dl className="mx-auto mt-3 grid max-w-md gap-3 text-left text-lg">
         <Pair label={`Opening, ${formatDay(check.lastDate)}`} value={inr(check.last)} />
         <Pair label="Service charge from the counter" value={check.collected == null ? "—" : inr(Math.max(0, (check.collected ?? 0) - check.personalGpay))} />
         {check.personalGpay + check.departmentGpay > 0 ? <Pair label="Personal GPay, not a shortage" value={inr(check.personalGpay + check.departmentGpay)} /> : null}
@@ -539,7 +449,7 @@ function CheckCard({
           Counter missing: {check.missing.map((item) => formatDay(item)).join(", ")}.
         </p>
       ) : shown.difference === 0 ? null : (
-        <div className="mt-3">
+        <div className="mx-auto mt-4 max-w-xs text-left">
           <label className="block max-w-xs text-sm">
             <span className="mb-1 block text-muted">Fixed</span>
             <MoneyField label="Amount fixed" value={fixed} disabled={locked} onChange={(amount) => onFixed(amount ?? 0)} />
@@ -895,7 +805,7 @@ function Pair({ label, value, tone = "ink" }: { label: string; value: string; to
   return (
     <div className="flex items-baseline justify-between gap-3">
       <dt className="text-muted">{label}</dt>
-      <dd className={cn("tabular-nums", tone === "bad" && "text-bad", tone === "warn" && "text-warn", tone === "good" && "text-accent")}>{value}</dd>
+      <dd className={cn("font-medium tabular-nums", tone === "bad" && "text-bad", tone === "warn" && "text-warn", tone === "good" && "text-accent")}>{value}</dd>
     </div>
   );
 }
