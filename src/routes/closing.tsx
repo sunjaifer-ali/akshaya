@@ -23,7 +23,7 @@ import {
 } from "@/lib/ledger/cash";
 import { addDays, formatDay, formatFull } from "@/lib/ledger/dates";
 import { pushClose } from "@/lib/ledger/share";
-import { myRole, closingAdvance, closingCredit, addCentrePayout, listCentrePayouts, removeCentrePayout, updateAdvance } from "@/lib/centre.functions";
+import { myRole, closingAdvance, closingCredit, addCentrePayout, listCentrePayouts, personalGpaySpan, removeCentrePayout, updateAdvance } from "@/lib/centre.functions";
 import { useCurrentUserState } from "@/lib/auth/use-current-user";
 import { useLedger } from "@/lib/ledger/store";
 import type { CashClose, CentrePayout, CreditGiven, CreditPayment, Employee } from "@/lib/ledger/types";
@@ -62,6 +62,7 @@ function ClosingPage() {
   const [payouts, setPayouts] = useState<CentrePayout[]>([]);
   const [payAmount, setPayAmount] = useState<number | null>(null);
   const [payNote, setPayNote] = useState("");
+  const [gpayByDate, setGpayByDate] = useState<Record<string, { service: number; department: number }>>({});
 
   useEffect(() => {
     void myRole()
@@ -107,6 +108,22 @@ function ClosingPage() {
       .catch(() => undefined);
   }, 15000, [date]);
 
+  useRefresh(() => {
+    if (!date) return;
+    return personalGpaySpan({ data: { from: addDays(date, -40), to: date } })
+      .then((book) => {
+        const next: Record<string, { service: number; department: number }> = {};
+        for (const line of book.lines) {
+          const bucket = next[line.date] ?? { service: 0, department: 0 };
+          bucket.service += line.amount;
+          bucket.department += line.department;
+          next[line.date] = bucket;
+        }
+        setGpayByDate(next);
+      })
+      .catch(() => undefined);
+  }, 15000, [date]);
+
   const base = editing ? draft : (saved ?? draft);
   const separate = Boolean(saved?.creditSeparate) || !saved || Boolean(today && date >= today);
   const useLiveAdvance = Boolean(liveAdvance?.tracked);
@@ -130,13 +147,18 @@ function ClosingPage() {
     if (liveAdvance.lastDate && item.date === liveAdvance.lastDate) return { ...item, advanceHeld: liveAdvance.lastHeld };
     return item;
   });
-  const check = checkClose(row, previewCloses, book.days, book.holidays, payouts);
+  const daysForClose = book.days.map((day) => {
+    const live = gpayByDate[day.date];
+    if (!live) return day;
+    return { ...day, personalGpay: live.service, departmentGpay: live.department };
+  });
+  const check = checkClose(row, previewCloses, daysForClose, book.holidays, payouts);
   const lined = book.cashCloses.map((item) => {
     if (item.date === date) return { ...item, creditSeparate: separate, profitTaken: row.profitTaken, profitNote: row.profitNote, advanceHeld: row.advanceHeld, advanceServed: row.advanceServed };
     if (liveAdvance?.tracked && liveAdvance.lastDate && item.date === liveAdvance.lastDate) return { ...item, advanceHeld: liveAdvance.lastHeld };
     return item;
   });
-  const lines = accountLines(lined, book.days, book.holidays, payouts);
+  const lines = accountLines(lined, daysForClose, book.holidays, payouts);
   const shorts = lines.filter((line) => line.unfixed < 0);
   const excesses = lines.filter((line) => line.unfixed > 0);
   const shortTotal = shorts.reduce((sum, line) => sum + -line.unfixed, 0);
@@ -520,8 +542,9 @@ function CheckCard({
       <h2 className="mt-5 font-medium">Put together</h2>
       <dl className="mx-auto mt-3 grid max-w-md gap-3 text-left text-lg">
         <Pair label={`Opening, ${formatDay(check.lastDate)}`} value={inr(check.last)} />
-        <Pair label="Service charge from the counter" value={check.collected == null ? "—" : inr(Math.max(0, (check.collected ?? 0) - check.personalGpay))} />
-        {check.personalGpay + check.departmentGpay > 0 ? <Pair label="Personal GPay, not a shortage" value={inr(check.personalGpay + check.departmentGpay)} /> : null}
+        <Pair label="Service charge kept in the centre" value={check.collected == null ? "—" : inr(Math.max(0, (check.collected ?? 0) - check.personalGpay))} />
+        {check.personalGpay > 0 ? <Pair label="Personal service, personal account only" value={`−${inr(check.personalGpay)}`} /> : null}
+        {check.departmentGpay > 0 ? <Pair label="Personal department, personal account only" value={`−${inr(check.departmentGpay)}`} /> : null}
         {given > 0 ? <Pair label="Credit given, not a shortage" value={inr(given)} /> : null}
         {paid > 0 ? <Pair label="Credit repaid, not an excess" value={inr(paid)} /> : null}
         {check.advanceIn > 0 ? <Pair label="Advance received, not an excess" value={inr(check.advanceIn)} /> : null}

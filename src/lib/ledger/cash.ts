@@ -246,11 +246,13 @@ export function checkClose(
   const advanceIn = typeof row.advanceIn === "number" ? Math.max(0, row.advanceIn) : Math.max(0, gap.advanceChange + (row.advanceServed ?? 0));
   const advanceServed = row.advanceServed ?? 0;
   const transfer = row.profitTaken ?? 0;
-  // Staff do not enter a service charge for a credit. The counter total is only money typed as a service charge.
-  // Personal GPay is service charge plus department pay. The department pay leaves the centre account, and neither part is centre cash.
+  // A Personal GPay payment lands entirely in the personal account. None of it is expected
+  // in the centre cash, wallets, or bank. The service-charge part is inside the counter
+  // total, so it comes out with the department part that has already left the centre bank.
+  const personalWhole = personalGpay + departmentGpay;
   const centreService = Math.max(0, known - personalGpay);
   const departmentOut = departmentGpay + bankDepartment;
-  const expected = opening + centreService + creditPaid + advanceIn - creditGiven - advanceServed - departmentOut - paidOut - transfer;
+  const expected = opening + known - personalWhole - bankDepartment + creditPaid + advanceIn - creditGiven - advanceServed - paidOut - transfer;
   const actual = closeBase(row);
   const difference = actual - expected;
   return {
