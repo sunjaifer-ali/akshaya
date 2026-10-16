@@ -187,7 +187,8 @@ function NotePage() {
 }
 
 function NoticeBoard({ admin }: { admin: boolean }) {
-  const people = useLedger((state) => state.employees.filter((person) => person.active));
+  const employees = useLedger((state) => state.employees);
+  const people = employees.filter((person) => person.active);
   const [lines, setLines] = useState<{ id: string; body: string; author: string; to: string; at: string }[]>([]);
   const [text, setText] = useState("");
   const [picked, setPicked] = useState<string[]>(["all"]);
