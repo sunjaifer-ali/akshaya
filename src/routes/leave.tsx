@@ -223,15 +223,12 @@ function AttendanceReport({
 
       <h3 className="font-medium">{formatFull(date)}</h3>
       <ul className="mt-2 divide-y divide-line rounded-xl border border-line bg-surface">
-        {people.map((employee) => {
-          const label = dayLabel(leaves, employee.id, date, holidays, today);
-          return (
+        {people.map((employee) => (
             <li key={employee.id} className="grid grid-cols-[minmax(8rem,14rem)_1fr] items-center gap-4 px-4 py-3 text-sm">
               <span className="font-medium">{employee.name}</span>
-              <span className={cn("font-medium", markTone(label))}>{label}</span>
+              <LeavePick employeeId={employee.id} date={date} />
             </li>
-          );
-        })}
+          ))}
       </ul>
 
       <h3 className="mt-6 font-medium">{formatMonth(reportMonth)}</h3>
@@ -513,6 +510,27 @@ function saveAttendanceExcel(
       ],
     },
   ]).catch(() => undefined);
+}
+
+function LeavePick({ employeeId, date }: { employeeId: string; date: string }) {
+  const holidays = useLedger((state) => state.holidays);
+  const mark = useLedger((state) => state.leaves.find((item) => item.employeeId === employeeId && item.date === date));
+  const setLeave = useLedger((state) => state.setLeave);
+  if (isSunday(date) || holidays.includes(date)) return <span className="text-muted">Holiday</span>;
+  return (
+    <select
+      aria-label="Leave"
+      className="h-11 w-full max-w-xs rounded-sm border border-line bg-bg px-3 text-base text-ink outline-none focus:border-accent"
+      value={mark?.code ?? ""}
+      onChange={(event) => setLeave(employeeId, date, (event.target.value || null) as LeaveCode | null)}
+    >
+      {CHOICES.map((choice) => (
+        <option key={choice.label} value={choice.code ?? ""}>
+          {choice.label}
+        </option>
+      ))}
+    </select>
+  );
 }
 
 function DayCell({

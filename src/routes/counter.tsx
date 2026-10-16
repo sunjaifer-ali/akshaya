@@ -37,7 +37,8 @@ function CounterPage() {
   const [pending, setPending] = useState(false);
   const [picked, setPicked] = useState("");
   const [editing, setEditing] = useState<ServiceLine | null>(null);
-  const [panel, setPanel] = useState<"" | "customers" | "credit" | "advance">("");
+  const [panel, setPanel] = useState<"live" | "credit" | "advance">("live");
+  const [showCustomers, setShowCustomers] = useState(false);
   const day = date || today || "";
 
   useEffect(() => {
@@ -157,23 +158,23 @@ function CounterPage() {
       <div className="mt-4 grid grid-cols-3 gap-2">
         {(
           [
-            ["customers", "Today's customers"],
+            ["live", "Live"],
             ["credit", "Credit"],
             ["advance", "Advances"],
           ] as const
         ).map(([id, label]) => (
-          <Button key={id} type="button" className="min-h-12" variant={panel === id ? "primary" : "secondary"} onClick={() => setPanel(panel === id ? "" : id)}>
+          <Button key={id} type="button" className="min-h-12" variant={panel === id ? "primary" : "secondary"} onClick={() => setPanel(id)}>
             {label}
           </Button>
         ))}
       </div>
 
-      {role === "employee" && closed ? (
+      {panel === "live" && role === "employee" && closed ? (
         <section className="mt-4 rounded-xl border border-line bg-surface p-5">
           <h2 className="font-display text-2xl">Day closed</h2>
           <p className="mt-1 text-sm text-muted">No more charges can be entered today. Tomorrow starts fresh.</p>
         </section>
-      ) : role === "employee" || (role === "admin" && day === today) ? (
+      ) : panel === "live" && (role === "employee" || (role === "admin" && day === today)) ? (
         <form
           className="mt-4 grid gap-3 rounded-xl border border-line bg-surface p-5 sm:grid-cols-2"
           onSubmit={(event) => {
@@ -189,18 +190,6 @@ function CounterPage() {
               value={service}
               onChange={(event) => setService(event.target.value)}
             />
-            <div className="mt-2 flex flex-wrap gap-2">
-              {SERVICES.map((item) => (
-                <button
-                  key={item}
-                  type="button"
-                  className={`min-h-9 rounded-full border px-3 text-sm ${service === item ? "border-accent bg-accent text-accent-ink" : "border-line bg-bg text-ink"}`}
-                  onClick={() => setService(item)}
-                >
-                  {item}
-                </button>
-              ))}
-            </div>
             <datalist id="akshaya-services">
               {SERVICES.map((item) => (
                 <option key={item} value={item} />
@@ -264,7 +253,7 @@ function CounterPage() {
             </Button>
           </div>
         </form>
-      ) : role === "admin" ? (
+      ) : panel === "live" && role === "admin" ? (
         <p className="mt-4 text-sm text-muted">Open today to enter a charge. This date is only for viewing.</p>
       ) : null}
       {notice ? <p className="mt-3 text-sm text-muted">{notice}</p> : null}
@@ -281,7 +270,15 @@ function CounterPage() {
         }}
       />
 
-      {panel === "customers" && role === "employee" ? (
+      {panel === "credit" ? <CounterCredit month={(day || today).slice(0, 7)} onResult={setResult} /> : null}
+      {panel === "advance" ? <CounterAdvance onResult={setResult} /> : null}
+
+      <div className="mt-4">
+        <Button type="button" className="min-h-12" variant={showCustomers ? "primary" : "secondary"} onClick={() => setShowCustomers((open) => !open)}>
+          Today's customers
+        </Button>
+      </div>
+      {showCustomers && role === "employee" ? (
         <section className="mt-4 rounded-xl border border-line bg-surface p-5">
           <h2 className="font-display text-2xl">Today's customers</h2>
           {lines.length === 0 ? <p className="mt-2 text-sm text-muted">Nothing entered for this day.</p> : null}
@@ -299,7 +296,7 @@ function CounterPage() {
           />
         </section>
       ) : null}
-      {panel === "customers" && role !== "employee" ? (
+      {showCustomers && role !== "employee" ? (
         <section className="mt-4 rounded-xl border border-line bg-surface p-5">
           <h2 className="font-display text-2xl">Today's customers</h2>
           {byStaff.size === 0 ? <p className="mt-2 text-sm text-muted">Nothing entered for this day.</p> : null}
@@ -341,8 +338,6 @@ function CounterPage() {
           </ul>
         </section>
       ) : null}
-      {panel === "credit" ? <CounterCredit month={(day || today).slice(0, 7)} onResult={setResult} /> : null}
-      {panel === "advance" ? <CounterAdvance onResult={setResult} /> : null}
       <ResultDialog result={result} onClose={() => setResult(null)} />
     </div>
   );
@@ -572,6 +567,8 @@ function GpaySplitDialog({
 
 function CounterCredit({ month, onResult }: { month: string; onResult: (result: Result) => void }) {
   const [open, setOpen] = useState<OpenCredit[]>([]);
+  const [given, setGiven] = useState(0);
+  const [received, setReceived] = useState(0);
   const [customer, setCustomer] = useState("");
   const [mobile, setMobile] = useState("");
   const [amount, setAmount] = useState("");
@@ -582,70 +579,86 @@ function CounterCredit({ month, onResult }: { month: string; onResult: (result: 
   const load = () => {
     if (!month) return;
     void customerCreditDesk({ data: month })
-      .then((book) => setOpen(book.open))
+      .then((book) => {
+        setOpen(book.open);
+        setGiven(book.credit);
+        setReceived(book.debit);
+      })
       .catch((error: unknown) => onResult({ ok: false, message: error instanceof Error ? error.message : "Credit did not open." }));
   };
   useRefresh(load, 15000, [month]);
 
   return (
-    <section className="mt-4 rounded-xl border border-line bg-surface p-5">
-      <h2 className="font-display text-2xl">Credit</h2>
-      <form
-        className="mt-3 grid gap-3 sm:grid-cols-2"
-        onSubmit={(event) => {
-          event.preventDefault();
-          setPending(true);
-          void addCustomerMove({ data: { kind: "credit", customer, mobile, amount: Number(amount) } })
-            .then(() => {
-              setCustomer("");
-              setMobile("");
-              setAmount("");
-              onResult({ ok: true, message: "Credit saved." });
-              load();
-            })
-            .catch((error: unknown) => onResult({ ok: false, message: error instanceof Error ? error.message : "Credit was not saved." }))
-            .finally(() => setPending(false));
-        }}
-      >
-        <input aria-label="Credit customer" className="h-11 rounded-sm border border-line bg-bg px-3" placeholder="Customer" value={customer} onChange={(event) => setCustomer(event.target.value)} />
-        <input aria-label="Credit mobile" inputMode="numeric" className="h-11 rounded-sm border border-line bg-bg px-3" placeholder="Mobile" value={mobile} onChange={(event) => setMobile(event.target.value)} />
-        <input aria-label="Credit amount" inputMode="numeric" className="h-11 rounded-sm border border-line bg-bg px-3" placeholder="Whole bill" value={amount} onChange={(event) => setAmount(event.target.value)} />
-        <Button type="submit" disabled={pending}>Add credit</Button>
-      </form>
-      {open.length === 0 ? <p className="mt-3 text-sm text-muted">No open credit.</p> : null}
-      <ul className="mt-2 divide-y divide-line">
-        {open.map((line) => (
-          <li key={`${line.customer}-${line.mobile}`} className="py-3 text-sm">
-            <div className="flex items-center justify-between gap-3">
-              <span>
-                {line.customer}
-                <span className="mt-0.5 block text-xs text-faint">{line.mobile || "No mobile"} · {inr(line.balance)}</span>
-              </span>
-              <Button size="sm" variant="secondary" onClick={() => setPayFor(payFor === line.customer ? "" : line.customer)}>Repay</Button>
-            </div>
-            {payFor === line.customer ? (
-              <form
-                className="mt-2 flex gap-2"
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  void addCustomerMove({ data: { kind: "debit", customer: line.customer, mobile: line.mobile, amount: Number(payAmount) } })
-                    .then(() => {
-                      setPayAmount("");
-                      setPayFor("");
-                      onResult({ ok: true, message: "Credit repayment saved." });
-                      load();
-                    })
-                    .catch((error: unknown) => onResult({ ok: false, message: error instanceof Error ? error.message : "Repayment was not saved." }));
-                }}
-              >
-                <input aria-label="Repay amount" inputMode="numeric" className="h-11 flex-1 rounded-sm border border-line bg-bg px-3" value={payAmount} onChange={(event) => setPayAmount(event.target.value)} />
-                <Button type="submit">Save</Button>
-              </form>
-            ) : null}
-          </li>
-        ))}
-      </ul>
-    </section>
+    <>
+      <div className="mt-4 grid items-start gap-4 sm:grid-cols-2">
+        <section className="rounded-xl border border-line border-l-4 border-l-bad bg-surface p-5">
+          <h2 className="font-display text-2xl">Credit given</h2>
+          <p className="mt-1 font-display text-3xl tabular-nums">{inr(given)}</p>
+          <form
+            className="mt-3 grid gap-3"
+            onSubmit={(event) => {
+              event.preventDefault();
+              setPending(true);
+              void addCustomerMove({ data: { kind: "credit", customer, mobile, amount: Number(amount) } })
+                .then(() => {
+                  setCustomer("");
+                  setMobile("");
+                  setAmount("");
+                  onResult({ ok: true, message: "Credit saved." });
+                  load();
+                })
+                .catch((error: unknown) => onResult({ ok: false, message: error instanceof Error ? error.message : "Credit was not saved." }))
+                .finally(() => setPending(false));
+            }}
+          >
+            <input aria-label="Credit customer" className="h-11 rounded-sm border border-line bg-bg px-3" placeholder="Customer" value={customer} onChange={(event) => setCustomer(event.target.value)} />
+            <input aria-label="Credit mobile" inputMode="numeric" className="h-11 rounded-sm border border-line bg-bg px-3" placeholder="Mobile" value={mobile} onChange={(event) => setMobile(event.target.value)} />
+            <input aria-label="Credit amount" inputMode="numeric" className="h-11 rounded-sm border border-line bg-bg px-3" placeholder="Whole bill" value={amount} onChange={(event) => setAmount(event.target.value)} />
+            <Button type="submit" disabled={pending}>Add credit</Button>
+          </form>
+        </section>
+        <section className="rounded-xl border border-line border-l-4 border-l-accent bg-surface p-5">
+          <h2 className="font-display text-2xl">Credit received</h2>
+          <p className="mt-1 font-display text-3xl tabular-nums">{inr(received)}</p>
+        </section>
+      </div>
+      <section className="mt-4 rounded-xl border border-line bg-surface p-5">
+        <h2 className="font-display text-2xl">Still unpaid</h2>
+        {open.length === 0 ? <p className="mt-3 text-sm text-muted">No open credit.</p> : null}
+        <ul className="mt-2 divide-y divide-line">
+          {open.map((line) => (
+            <li key={`${line.customer}-${line.mobile}`} className="py-3 text-sm">
+              <div className="flex items-center justify-between gap-3">
+                <span>
+                  {line.customer}
+                  <span className="mt-0.5 block text-xs text-faint">{line.mobile || "No mobile"} · {inr(line.balance)}</span>
+                </span>
+                <Button size="sm" variant="secondary" onClick={() => setPayFor(payFor === line.customer ? "" : line.customer)}>Receive</Button>
+              </div>
+              {payFor === line.customer ? (
+                <form
+                  className="mt-2 flex gap-2"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    void addCustomerMove({ data: { kind: "debit", customer: line.customer, mobile: line.mobile, amount: Number(payAmount) } })
+                      .then(() => {
+                        setPayAmount("");
+                        setPayFor("");
+                        onResult({ ok: true, message: "Credit repayment saved." });
+                        load();
+                      })
+                      .catch((error: unknown) => onResult({ ok: false, message: error instanceof Error ? error.message : "Repayment was not saved." }));
+                  }}
+                >
+                  <input aria-label="Repay amount" inputMode="numeric" className="h-11 flex-1 rounded-sm border border-line bg-bg px-3" value={payAmount} onChange={(event) => setPayAmount(event.target.value)} />
+                  <Button type="submit">Save</Button>
+                </form>
+              ) : null}
+            </li>
+          ))}
+        </ul>
+      </section>
+    </>
   );
 }
 

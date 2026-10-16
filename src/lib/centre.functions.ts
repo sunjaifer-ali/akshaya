@@ -1564,6 +1564,7 @@ async function ensureNoticeTables(sql: Awaited<ReturnType<typeof import("@/lib/d
       created_at timestamptz not null default now()
     )`,
   );
+  await sql.query(`alter table centre_notice add column if not exists audience text not null default 'all'`);
   await sql.query(
     `create table if not exists centre_notice_seen (
       user_id text not null,
@@ -1573,49 +1574,98 @@ async function ensureNoticeTables(sql: Awaited<ReturnType<typeof import("@/lib/d
   );
 }
 
+function noticeFor(audience: string, employeeId: string, desk: string): boolean {
+  if (!audience || audience === "all") return true;
+  const parts = audience.split(",");
+  return parts.includes(`desk:${desk}`) || parts.includes(`staff:${employeeId}`);
+}
+
+function audienceLabel(audience: string, names: Map<string, string>): string {
+  if (!audience || audience === "all") return "Everyone";
+  return audience
+    .split(",")
+    .map((part) => {
+      if (part === "desk:aadhaar") return "Aadhaar desk";
+      if (part === "desk:service") return "Service desk";
+      if (part.startsWith("staff:")) return names.get(part.slice(6)) ?? "Staff";
+      return "";
+    })
+    .filter(Boolean)
+    .join(", ");
+}
+
 export const listNotices = createServerFn({ method: "GET" })
   .middleware([authMiddleware])
   .handler(async ({ context }) => {
-    await requireMember(context.userId);
+    const role = await requireMember(context.userId);
     const { getSql } = await import("@/lib/db");
     const sql = await getSql();
     await ensureNoticeTables(sql);
-    const rows = await sql<{ id: string; body: string; author: string; at: string }>`
-      select id, body, author, created_at::text as at from centre_notice order by created_at desc limit 30
+    const member = await sql<{ name: string }>`select name from centre_member where user_id = ${context.userId}`;
+    const bookRow = await sql<{ data: LedgerData | string }>`select data from centre_book where id = 'centre'`;
+    const book = bookRow[0] ? asJson(bookRow[0].data) : null;
+    const people = book?.employees ?? [];
+    const names = new Map(people.map((person) => [person.id, person.name]));
+    const mine = people.find((person) => person.name.trim().toLowerCase() === (member[0]?.name ?? "").trim().toLowerCase());
+    const { deskOf } = await import("@/lib/ledger/calc");
+    const desk = mine ? deskOf(mine) : "service";
+    const rows = await sql<{ id: string; body: string; author: string; audience: string; at: string }>`
+      select id, body, author, audience, created_at::text as at from centre_notice order by created_at desc limit 80
     `;
-    const unread = await sql<{ total: number }>`
-      select count(*)::int as total from centre_notice n
-      where not exists (
-        select 1 from centre_notice_seen s where s.notice_id = n.id and s.user_id = ${context.userId}
-      )
-    `;
-    return {
-      unread: Number(unread[0]?.total ?? 0),
-      lines: rows.map((row) => ({ id: row.id, body: row.body, author: row.author, at: String(row.at).slice(0, 16).replace("T", " ") })),
-    };
+    const seen = await sql<{ notice_id: string }>`select notice_id from centre_notice_seen where user_id = ${context.userId}`;
+    const seenIds = new Set(seen.map((row) => row.notice_id));
+    const visible = rows.filter((row) => role === "admin" || noticeFor(row.audience || "all", mine?.id ?? "", desk));
+    const lines = visible.slice(0, 30).map((row) => ({
+      id: row.id,
+      body: row.body,
+      author: row.author,
+      to: audienceLabel(row.audience || "all", names),
+      at: String(row.at).slice(0, 16).replace("T", " "),
+    }));
+    return { unread: visible.filter((row) => !seenIds.has(row.id)).length, lines };
   });
 
 export const markNoticesSeen = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
   .handler(async ({ context }) => {
-    await requireMember(context.userId);
+    const role = await requireMember(context.userId);
     const { getSql } = await import("@/lib/db");
     const sql = await getSql();
     await ensureNoticeTables(sql);
-    await sql`
-      insert into centre_notice_seen (user_id, notice_id)
-      select ${context.userId}, id from centre_notice
-      on conflict (user_id, notice_id) do nothing
-    `;
+    if (role === "admin") {
+      await sql`
+        insert into centre_notice_seen (user_id, notice_id)
+        select ${context.userId}, id from centre_notice
+        on conflict (user_id, notice_id) do nothing
+      `;
+      return { ok: true };
+    }
+    const member = await sql<{ name: string }>`select name from centre_member where user_id = ${context.userId}`;
+    const bookRow = await sql<{ data: LedgerData | string }>`select data from centre_book where id = 'centre'`;
+    const book = bookRow[0] ? asJson(bookRow[0].data) : null;
+    const mine = (book?.employees ?? []).find((person) => person.name.trim().toLowerCase() === (member[0]?.name ?? "").trim().toLowerCase());
+    const { deskOf } = await import("@/lib/ledger/calc");
+    const desk = mine ? deskOf(mine) : "service";
+    const rows = await sql<{ id: string; audience: string }>`select id, audience from centre_notice`;
+    const ids = rows.filter((row) => noticeFor(row.audience || "all", mine?.id ?? "", desk)).map((row) => row.id);
+    for (const id of ids) {
+      await sql`
+        insert into centre_notice_seen (user_id, notice_id) values (${context.userId}, ${id})
+        on conflict (user_id, notice_id) do nothing
+      `;
+    }
     return { ok: true };
   });
 
 export const addNotice = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
-  .validator((body: string) => {
-    const text = body.trim().slice(0, 400);
+  .validator((input: { body: string; to: string[] }) => {
+    const text = String(input?.body ?? "").trim().slice(0, 400);
     if (!text) throw new Error("Write the message.");
-    return text;
+    const allowed = new Set(["all", "desk:aadhaar", "desk:service"]);
+    const to = [...new Set((input?.to ?? []).map((item) => String(item).trim()).filter((item) => allowed.has(item) || /^staff:[A-Za-z0-9_-]+$/.test(item)))];
+    if (to.length === 0) throw new Error("Choose who should get this message.");
+    return { body: text, to: to.includes("all") ? ["all"] : to };
   })
   .handler(async ({ context, data }) => {
     await requireAdmin(context.userId);
@@ -1623,7 +1673,8 @@ export const addNotice = createServerFn({ method: "POST" })
     const sql = await getSql();
     await ensureNoticeTables(sql);
     const member = await sql<{ name: string }>`select name from centre_member where user_id = ${context.userId}`;
-    await sql`insert into centre_notice (id, body, author) values (${crypto.randomUUID()}, ${data}, ${member[0]?.name || "Admin"})`;
+    const audience = data.to.join(",");
+    await sql`insert into centre_notice (id, body, author, audience) values (${crypto.randomUUID()}, ${data.body}, ${member[0]?.name || "Admin"}, ${audience})`;
     return { ok: true };
   });
 
@@ -2045,11 +2096,11 @@ function applyLiveHalfDay(book: LedgerData, clocks: Map<string, { first: string;
   for (const employee of book.employees ?? []) {
     if (!employee.active) continue;
     const previous = (book.leaves ?? []).find((mark) => mark.employeeId === employee.id && mark.date === date);
-    if (previous && previous.code !== "HD" && previous.code !== "LWP") continue;
+    if (previous && previous.code !== "HD") continue;
     const first = wallClock(clocks.get(employee.id)?.first);
     const worked = first !== "";
-    const code = worked ? (first > "12:00:00" ? "HD" : null) : afterTwo ? "HD" : null;
-    leaves = leaves.filter((mark) => mark.employeeId !== employee.id || mark.date !== date || (mark.code !== "HD" && mark.code !== "LWP"));
+    const code = worked ? (first > "12:00:00" ? "HD" : null) : !afterTwo && previous?.code !== "HD" ? null : "HD";
+    leaves = leaves.filter((mark) => mark.employeeId !== employee.id || mark.date !== date || mark.code !== "HD");
     if (code) leaves.push({ employeeId: employee.id, date, code });
   }
   return { ...book, leaves };

@@ -148,7 +148,7 @@ function CreditPage() {
           <DaySelect value={day} dates={movementDates} onChange={setDay} />
         </div>
       ) : null}
-      <div className="mt-4 grid items-start gap-4 lg:grid-cols-2">
+      <div className="mt-4 grid items-start gap-4 sm:grid-cols-2">
       <section className="rounded-xl border border-line border-l-4 border-l-bad bg-surface p-5">
         <h2 className="font-display text-2xl">Credit given</h2>
       <form
@@ -205,8 +205,11 @@ function CreditPage() {
       </section>
       <section className="rounded-xl border border-line border-l-4 border-l-accent bg-surface p-5">
         <h2 className="font-display text-2xl">Credit received</h2>
-      <section className="mt-4">
-        <h3 className="font-medium">Still unpaid</h3>
+      {role === "admin" ? <MoveList lines={paidLines} empty="No credit received in this view." onDelete={(id) => deleteMove(id, setResult, load)} /> : <p className="mt-3 text-sm text-muted">Today {inr(debit)}</p>}
+      </section>
+      </div>
+      <section className="mt-4 rounded-xl border border-line bg-surface p-5">
+        <h2 className="font-display text-2xl">Still unpaid</h2>
         {open.length === 0 ? <p className="mt-2 text-sm text-muted">Nobody owes money.</p> : null}
         {byMonth(open).map((group) => (
           <div key={group.month}>
@@ -285,9 +288,6 @@ function CreditPage() {
           </div>
         ))}
       </section>
-      {role === "admin" ? <MoveList lines={paidLines} empty="No credit received in this view." onDelete={(id) => deleteMove(id, setResult, load)} /> : null}
-      </section>
-      </div>
       </>
       ) : null}
       <ResultDialog result={result} onClose={() => setResult(null)} />
@@ -347,7 +347,7 @@ function AdvanceBlock({ month }: { month: string }) {
           <DaySelect value={shownDay} dates={servedDates} onChange={setServedDay} />
         </div>
       ) : null}
-      <div className="mt-4 grid items-start gap-4 lg:grid-cols-2">
+      <div className="mt-4 grid items-start gap-4 sm:grid-cols-2">
     <section className="rounded-xl border border-line border-l-4 border-l-bad bg-surface p-5">
       <h2 className="font-display text-2xl">Advance received</h2>
       <form

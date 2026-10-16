@@ -4,6 +4,7 @@ import { MonthBar } from "@/components/month-bar";
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import { useCurrentUserState } from "@/lib/auth/use-current-user";
+import { useLedger } from "@/lib/ledger/store";
 import { addNotice, listNotices, markNoticesSeen, myRole, removeNotice } from "@/lib/centre.functions";
 import { cn } from "@/lib/cn";
 import {
@@ -19,7 +20,6 @@ import {
   type NoteTone,
 } from "@/lib/ledger/calc";
 import { addMonths, datesInMonth, formatMonth, isSunday } from "@/lib/ledger/dates";
-import { useLedger } from "@/lib/ledger/store";
 import { readMonth } from "@/lib/search";
 import { useResolvedMonth, useTodayKey } from "@/lib/use-today";
 
@@ -187,8 +187,10 @@ function NotePage() {
 }
 
 function NoticeBoard({ admin }: { admin: boolean }) {
-  const [lines, setLines] = useState<{ id: string; body: string; author: string; at: string }[]>([]);
+  const people = useLedger((state) => state.employees.filter((person) => person.active));
+  const [lines, setLines] = useState<{ id: string; body: string; author: string; to: string; at: string }[]>([]);
   const [text, setText] = useState("");
+  const [picked, setPicked] = useState<string[]>(["all"]);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
   const [received, setReceived] = useState(false);
@@ -211,18 +213,31 @@ function NoticeBoard({ admin }: { admin: boolean }) {
     load();
   }, []);
 
+  const toggle = (id: string) => {
+    setPicked((current) => {
+      if (id === "all") return current.includes("all") ? [] : ["all"];
+      const rest = current.filter((item) => item !== "all");
+      return rest.includes(id) ? rest.filter((item) => item !== id) : [...rest, id];
+    });
+  };
+
   return (
     <section className="rounded-xl border border-line bg-surface p-5">
       {admin ? (
         <form
-          className="mb-4 grid gap-2"
+          className="mb-4 grid gap-3"
           onSubmit={(event) => {
             event.preventDefault();
+            if (picked.length === 0) {
+              setError("Choose who should get this message.");
+              return;
+            }
             setPending(true);
             setError("");
-            void addNotice({ data: text })
+            void addNotice({ data: { body: text, to: picked } })
               .then(() => {
                 setText("");
+                setPicked(["all"]);
                 load();
               })
               .catch((caught: unknown) => setError(caught instanceof Error ? caught.message : "The message was not sent."))
@@ -236,9 +251,17 @@ function NoticeBoard({ admin }: { admin: boolean }) {
             placeholder="Message to staff"
             onChange={(event) => setText(event.target.value.slice(0, 400))}
           />
+          <div className="flex flex-wrap gap-2">
+            <Pick on={picked.includes("all")} label="Everyone" onToggle={() => toggle("all")} />
+            <Pick on={picked.includes("desk:aadhaar")} label="Aadhaar desk" onToggle={() => toggle("desk:aadhaar")} />
+            <Pick on={picked.includes("desk:service")} label="Service desk" onToggle={() => toggle("desk:service")} />
+            {people.map((person) => (
+              <Pick key={person.id} on={picked.includes(`staff:${person.id}`)} label={person.name} onToggle={() => toggle(`staff:${person.id}`)} />
+            ))}
+          </div>
           <div>
             <Button type="submit" disabled={pending}>
-              {pending ? "Sending…" : "Send to staff"}
+              {pending ? "Sending…" : "Send"}
             </Button>
           </div>
         </form>
@@ -251,7 +274,9 @@ function NoticeBoard({ admin }: { admin: boolean }) {
           <li key={line.id} className="flex items-start justify-between gap-3 py-3">
             <div>
               <p className="text-base">{line.body}</p>
-              <p className="mt-1 text-xs text-faint">{line.at}</p>
+              <p className="mt-1 text-xs text-faint">
+                {line.to} · {line.at}
+              </p>
             </div>
             {admin ? (
               <Button
@@ -268,6 +293,18 @@ function NoticeBoard({ admin }: { admin: boolean }) {
         ))}
       </ul>
     </section>
+  );
+}
+
+function Pick({ on, label, onToggle }: { on: boolean; label: string; onToggle: () => void }) {
+  return (
+    <button
+      type="button"
+      className={`min-h-11 rounded-full border px-3 text-sm ${on ? "border-accent bg-accent text-accent-ink" : "border-line bg-bg text-ink"}`}
+      onClick={onToggle}
+    >
+      {label}
+    </button>
   );
 }
 
