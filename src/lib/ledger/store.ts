@@ -10,6 +10,7 @@ import type {
   LeaveCode,
   LeaveMark,
   LedgerData,
+  SalaryPaid,
 } from "@/lib/ledger/types";
 
 type LedgerState = LedgerData & {
@@ -45,6 +46,7 @@ type LedgerState = LedgerData & {
   setLastYear: (month: string, amount: number | null) => void;
   setCashClose: (close: CashClose) => void;
   clearCashClose: (date: string) => void;
+  setSalaryPaid: (entry: SalaryPaid) => void;
 };
 
 function sortDays(days: CollectionDay[]): CollectionDay[] {
@@ -336,6 +338,13 @@ export const useLedger = create<LedgerState>()(
         set((state) => ({
           cashCloses: state.cashCloses.filter((item) => item.date !== date),
         })),
+      setSalaryPaid: (entry) =>
+        set((state) => {
+          const rest = (state.salaryPaid ?? []).filter(
+            (item) => !(item.employeeId === entry.employeeId && item.month === entry.month),
+          );
+          return { salaryPaid: [...rest, entry] };
+        }),
     }),
     {
       name: "akshaya-thrikkadeeri-book",
@@ -345,6 +354,7 @@ export const useLedger = create<LedgerState>()(
         if (version < 4) return buildCentreBook();
         const book = persisted as LedgerData;
         if (!Array.isArray(book.cashCloses)) book.cashCloses = [];
+        book.salaryPaid = book.salaryPaid ?? [];
         book.cashCloses = book.cashCloses.map((row) => ({
           ...row,
           creditPaid: row.creditPaid ?? [],
@@ -372,6 +382,7 @@ export const useLedger = create<LedgerState>()(
         perfOverrides: state.perfOverrides,
         lyOverrides: state.lyOverrides,
         cashCloses: state.cashCloses,
+        salaryPaid: state.salaryPaid ?? [],
       }),
     },
   ),

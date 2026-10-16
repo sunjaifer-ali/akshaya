@@ -23,7 +23,7 @@ import {
 } from "@/lib/ledger/cash";
 import { addDays, formatDay, formatFull } from "@/lib/ledger/dates";
 import { pushClose } from "@/lib/ledger/share";
-import { myRole, closingAdvance, closingCredit, addCentrePayout, listCentrePayouts, personalGpaySpan, removeCentrePayout, updateAdvance } from "@/lib/centre.functions";
+import { myRole, closingDesk, closingAdvance, addCentrePayout, listCentrePayouts, removeCentrePayout, updateAdvance } from "@/lib/centre.functions";
 import { useCurrentUserState } from "@/lib/auth/use-current-user";
 import { useLedger } from "@/lib/ledger/store";
 import type { CashClose, CentrePayout, CreditGiven, CreditPayment, Employee } from "@/lib/ledger/types";
@@ -90,39 +90,18 @@ function ClosingPage() {
   }, [date]);
 
   useRefresh(() => {
-    return closingCredit({ data: date })
-      .then((credit) => setLiveCredit({ given: credit.given, paid: credit.paid, unpaid: credit.unpaid }))
-      .catch(() => undefined);
-  }, 15000, [date]);
-
-  useRefresh(() => {
     if (role !== "admin" && role !== "closer") return;
-    return closingAdvance({ data: date })
-      .then((advance) => setLiveAdvance(advance))
-      .catch(() => undefined);
-  }, 15000, [date, role]);
-
-  useRefresh(() => {
-    return listCentrePayouts({ data: date })
-      .then((desk) => setPayouts(desk.rows))
-      .catch(() => undefined);
-  }, 15000, [date]);
-
-  useRefresh(() => {
-    if (!date) return;
-    return personalGpaySpan({ data: { from: addDays(date, -40), to: date } })
-      .then((book) => {
+    return closingDesk({ data: date })
+      .then((desk) => {
+        setLiveCredit(desk.credit);
+        setLiveAdvance(desk.advance);
+        setPayouts(desk.payouts);
         const next: Record<string, { service: number; department: number }> = {};
-        for (const line of book.lines) {
-          const bucket = next[line.date] ?? { service: 0, department: 0 };
-          bucket.service += line.amount;
-          bucket.department += line.department;
-          next[line.date] = bucket;
-        }
+        for (const line of desk.gpay) next[line.date] = { service: line.service, department: line.department };
         setGpayByDate(next);
       })
       .catch(() => undefined);
-  }, 15000, [date]);
+  }, 45000, [date, role]);
 
   const base = editing ? draft : (saved ?? draft);
   const separate = Boolean(saved?.creditSeparate) || !saved || Boolean(today && date >= today);
@@ -542,15 +521,15 @@ function CheckCard({
       <h2 className="mt-5 font-medium">Put together</h2>
       <dl className="mx-auto mt-3 grid max-w-md gap-3 text-left text-lg">
         <Pair label={`Opening, ${formatDay(check.lastDate)}`} value={inr(check.last)} />
-        <Pair label="Service charge kept in the centre" value={check.collected == null ? "—" : inr(Math.max(0, (check.collected ?? 0) - check.personalGpay))} />
+        <Pair label="Counter collection" value={check.collected == null ? "—" : `+${inr(check.collected)}`} />
         {check.personalGpay > 0 ? <Pair label="Personal service, personal account only" value={`−${inr(check.personalGpay)}`} /> : null}
         {check.departmentGpay > 0 ? <Pair label="Personal department, personal account only" value={`−${inr(check.departmentGpay)}`} /> : null}
-        {given > 0 ? <Pair label="Credit given, not a shortage" value={inr(given)} /> : null}
-        {paid > 0 ? <Pair label="Credit repaid, not an excess" value={inr(paid)} /> : null}
-        {check.advanceIn > 0 ? <Pair label="Advance received, not an excess" value={inr(check.advanceIn)} /> : null}
-        {check.advanceServed > 0 ? <Pair label="Advance served, not a shortage" value={inr(check.advanceServed)} /> : null}
-        {check.paidOut > 0 ? <Pair label="Expenses" value={inr(check.paidOut)} /> : null}
-        {check.profitTaken > 0 ? <Pair label="Transferred out" value={inr(check.profitTaken)} /> : null}
+        {given > 0 ? <Pair label="Credit given, not a shortage" value={`−${inr(given)}`} /> : null}
+        {paid > 0 ? <Pair label="Credit repaid, not an excess" value={`+${inr(paid)}`} /> : null}
+        {check.advanceIn > 0 ? <Pair label="Advance received, not an excess" value={`+${inr(check.advanceIn)}`} /> : null}
+        {check.advanceServed > 0 ? <Pair label="Advance served, not a shortage" value={`−${inr(check.advanceServed)}`} /> : null}
+        {check.paidOut > 0 ? <Pair label="Expenses" value={`−${inr(check.paidOut)}`} /> : null}
+        {check.profitTaken > 0 ? <Pair label="Transferred out" value={`−${inr(check.profitTaken)}`} /> : null}
       </dl>
       {hold ? null : shown.missing.length > 0 ? (
         <p className="mt-3 text-sm text-muted">

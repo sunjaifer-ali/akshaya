@@ -43,6 +43,7 @@ function ExpensesPage() {
     collection,
     book.deductLwp,
     today,
+    book.salaryPaid ?? [],
   );
   const salary = payRows.reduce((sum, item) => sum + item.pay.basicPayable, 0);
   const incentive = payRows.reduce((sum, item) => sum + item.pay.incentive, 0);

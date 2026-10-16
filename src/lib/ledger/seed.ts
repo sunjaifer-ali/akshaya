@@ -195,6 +195,7 @@ export function buildSample(): LedgerData {
     perfOverrides: [],
     lyOverrides: {},
     cashCloses: [],
+    salaryPaid: [],
   };
 }
 
@@ -213,6 +214,7 @@ export function emptyBook(centreName: string): LedgerData {
     perfOverrides: [],
     lyOverrides: {},
     cashCloses: [],
+    salaryPaid: [],
   };
 }
 
@@ -423,5 +425,6 @@ export function buildCentreBook(): LedgerData {
     perfOverrides: [],
     lyOverrides: { ...LAST_YEAR },
     cashCloses: [],
+    salaryPaid: [],
   };
 }

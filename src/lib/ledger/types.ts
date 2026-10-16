@@ -109,6 +109,14 @@ export type PerfOverride = {
   amount: number;
 };
 
+export type SalaryPaid = {
+  employeeId: string;
+  month: string;
+  basic: number;
+  incentive: number;
+  confirmed: boolean;
+};
+
 export type LedgerData = {
   centreName: string;
   deductLwp: boolean;
@@ -124,6 +132,7 @@ export type LedgerData = {
   lyOverrides: Record<string, number>;
   cashCloses: CashClose[];
   payouts?: CentrePayout[];
+  salaryPaid: SalaryPaid[];
 };
 
 export const DEFAULT_CATEGORIES: ExpenseCategory[] = [

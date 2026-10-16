@@ -8,7 +8,7 @@ import { ResultDialog, type Result } from "@/components/result-dialog";
 import { Button } from "@/components/ui/button";
 import { inr, pct } from "@/lib/format";
 import { employeeSplitSum, leaveTally, monthCollection, staffMonthRows, type StaffMonthRow } from "@/lib/ledger/calc";
-import { formatMonth, formatMonthShort, fyMonths, fyStartYear } from "@/lib/ledger/dates";
+import { datesInMonth, formatDay, formatMonth, isSunday } from "@/lib/ledger/dates";
 import { useLedger } from "@/lib/ledger/store";
 import type { Employee } from "@/lib/ledger/types";
 import { readMonth } from "@/lib/search";
@@ -36,6 +36,7 @@ function SalaryPage() {
     centre,
     book.deductLwp,
     today,
+    book.salaryPaid ?? [],
   );
   const staffCollection = rows.reduce((sum, row) => sum + row.collection, 0);
   const salaryOnly = rows.reduce((sum, row) => sum + row.pay.basicPayable, 0);
@@ -45,6 +46,7 @@ function SalaryPage() {
   const [editing, setEditing] = useState<Employee | null>(null);
   const [open, setOpen] = useState(false);
   const [slip, setSlip] = useState<string | null>(null);
+  const [payTab, setPayTab] = useState<"given" | "actual">("given");
   const [result, setResult] = useState<Result | null>(null);
   const slipRows = rows.filter((row) => row.employee.id === slip);
   const shown = rows.find((row) => row.employee.id === picked) ?? rows[0];
@@ -151,7 +153,15 @@ function SalaryPage() {
         </section>
       ) : null}
 
-      <SalaryGiven month={month} today={today} />
+      <div className="mt-4 flex flex-wrap gap-2">
+        <Button variant={payTab === "given" ? "primary" : "secondary"} onClick={() => setPayTab("given")}>
+          Salary given
+        </Button>
+        <Button variant={payTab === "actual" ? "primary" : "secondary"} onClick={() => setPayTab("actual")}>
+          Actual salary
+        </Button>
+      </div>
+      {payTab === "actual" ? <ActualSalary month={month} rows={rows} /> : <SalaryGiven month={month} today={today} />}
 
       <StaffDialog
         open={open}
@@ -407,41 +417,165 @@ function SlipMoney({ label, value }: { label: string; value: string }) {
 
 function SalaryGiven({ month, today }: { month: string; today: string }) {
   const book = useLedger();
-  const months = fyMonths(fyStartYear(month)).filter((item) => !today || item <= today.slice(0, 7));
-  const people = book.employees.filter((employee) => employee.active || months.some((item) => employeeSplitSum(book.days, employee.id, item) > 0));
+  const people = book.employees.filter((employee) => employee.active || employeeSplitSum(book.days, employee.id, month) > 0);
+  const collection = monthCollection(book.days, month);
   return (
     <section className="mt-4 overflow-x-auto rounded-xl border border-line bg-surface">
       <h2 className="px-4 pt-4 font-medium">Salary given</h2>
-      <p className="px-4 pb-2 text-sm text-muted">Basic pay plus incentive for each month.</p>
+      <p className="px-4 pb-2 text-sm text-muted">{formatMonth(month)}. A confirmed figure is the final salary. Use the month arrows to change the month.</p>
       <table className="w-full min-w-[36rem] text-sm">
         <thead>
           <tr className="border-b border-line text-left text-xs font-semibold tracking-widest text-faint">
             <th className="px-3 py-2 font-medium">Staff</th>
-            <th className="px-3 py-2 font-medium">Month</th>
             <th className="px-3 py-2 text-right font-medium">Basic</th>
             <th className="px-3 py-2 text-right font-medium">Incentive</th>
             <th className="px-3 py-2 text-right font-medium">Given</th>
+            <th className="px-3 py-2 font-medium">Figure</th>
           </tr>
         </thead>
         <tbody>
-          {people.flatMap((employee) =>
-            months.map((item) => {
-              const collection = monthCollection(book.days, item);
-              const row = staffMonthRows(book.employees, book.days, book.perfOverrides, book.leaves, book.holidays, item, collection, book.deductLwp, today).find((person) => person.employee.id === employee.id);
-              if (!row || (row.pay.gross <= 0 && row.collection <= 0)) return [];
-              return [
-                <tr key={`${employee.id}-${item}`} className="border-t border-line">
-                  <td className="px-3 py-2">{employee.name}</td>
-                  <td className="px-3 py-2">{formatMonthShort(item)}</td>
-                  <td className="px-3 py-2 text-right tabular-nums">{inr(row.pay.basicPayable)}</td>
-                  <td className="px-3 py-2 text-right tabular-nums">{inr(row.pay.incentive)}</td>
-                  <td className="px-3 py-2 text-right font-medium tabular-nums">{inr(row.pay.gross)}</td>
-                </tr>,
-              ];
-            }),
-          )}
+          {people.map((employee) => {
+            const row = staffMonthRows(book.employees, book.days, book.perfOverrides, book.leaves, book.holidays, month, collection, book.deductLwp, today, book.salaryPaid ?? []).find((person) => person.employee.id === employee.id);
+            if (!row || (row.pay.gross <= 0 && row.collection <= 0)) return null;
+            const final = (book.salaryPaid ?? []).some((item) => item.confirmed && item.employeeId === employee.id && item.month === month);
+            return (
+              <tr key={employee.id} className="border-t border-line">
+                <td className="px-3 py-2">{employee.name}</td>
+                <td className="px-3 py-2 text-right tabular-nums">{inr(row.pay.basicPayable)}</td>
+                <td className="px-3 py-2 text-right tabular-nums">{inr(row.pay.incentive)}</td>
+                <td className="px-3 py-2 text-right font-medium tabular-nums">{inr(row.pay.gross)}</td>
+                <td className="px-3 py-2">{final ? "Final" : "Calculated"}</td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
+    </section>
+  );
+}
+
+function ActualSalary({ month, rows }: { month: string; rows: StaffMonthRow[] }) {
+  const book = useLedger();
+  const setSalaryPaid = useLedger((state) => state.setSalaryPaid);
+  const [editing, setEditing] = useState<string | null>(null);
+  const [draft, setDraft] = useState<Record<string, { basic: string; incentive: string }>>({});
+  const [result, setResult] = useState<Result | null>(null);
+  const closed = new Set(book.holidays);
+  const payday = datesInMonth(month).filter((date) => !isSunday(date) && !closed.has(date)).at(-1) ?? `${month}-28`;
+
+  const savedOf = (id: string) => (book.salaryPaid ?? []).find((item) => item.employeeId === id && item.month === month);
+
+  const write = (id: string, confirmed: boolean) => {
+    const row = rows.find((item) => item.employee.id === id);
+    if (!row) return;
+    const current = savedOf(id);
+    const basicText = editing === id ? (draft[id]?.basic ?? String(current?.basic ?? row.pay.basicPayable)) : String(current?.basic ?? row.pay.basicPayable);
+    const incentiveText = editing === id ? (draft[id]?.incentive ?? String(current?.incentive ?? row.pay.incentive)) : String(current?.incentive ?? row.pay.incentive);
+    const basic = Math.max(0, Math.round(Number(basicText) || 0));
+    const incentive = Math.max(0, Math.round(Number(incentiveText) || 0));
+    setSalaryPaid({ employeeId: id, month, basic, incentive, confirmed });
+    setEditing(null);
+    setResult({
+      ok: true,
+      message: confirmed
+        ? `${row.employee.name}'s salary for ${formatMonth(month)} is confirmed. Centre totals use ${inr(basic + incentive)}.`
+        : `${row.employee.name}'s salary is saved. Confirm it to use it in the centre totals.`,
+    });
+  };
+
+  return (
+    <section className="mt-4 rounded-xl border border-line bg-surface p-5">
+      <h2 className="font-medium">Actual salary given</h2>
+      <p className="mt-1 text-sm text-muted">
+        {formatMonth(month)}. Salary is transferred on the last working day, {formatDay(payday)}. Save keeps the amount. Confirm makes it the final salary for the centre totals.
+      </p>
+      <ul className="mt-4 divide-y divide-line">
+        {rows.map((row) => {
+          const saved = savedOf(row.employee.id);
+          const open = editing === row.employee.id;
+          const basic = saved?.basic ?? row.pay.basicPayable;
+          const incentive = saved?.incentive ?? row.pay.incentive;
+          return (
+            <li key={row.employee.id} className="py-4">
+              <div className="flex flex-wrap items-baseline justify-between gap-3">
+                <p className="font-medium">{row.employee.name}</p>
+                <p className="text-sm text-muted">{saved?.confirmed ? "Final" : saved ? "Saved" : "Not entered"}</p>
+              </div>
+              {open ? (
+                <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                  <label className="block text-sm">
+                    <span className="mb-1 block text-muted">Basic</span>
+                    <input
+                      inputMode="numeric"
+                      aria-label={`${row.employee.name} basic`}
+                      className="h-11 w-full rounded-sm border border-line bg-bg px-3 text-base tabular-nums outline-none focus:border-accent"
+                      value={draft[row.employee.id]?.basic ?? String(basic)}
+                      onChange={(event) =>
+                        setDraft((current) => ({
+                          ...current,
+                          [row.employee.id]: {
+                            basic: event.target.value.replace(/[^\d]/g, ""),
+                            incentive: current[row.employee.id]?.incentive ?? String(incentive),
+                          },
+                        }))
+                      }
+                    />
+                  </label>
+                  <label className="block text-sm">
+                    <span className="mb-1 block text-muted">Incentive</span>
+                    <input
+                      inputMode="numeric"
+                      aria-label={`${row.employee.name} incentive`}
+                      className="h-11 w-full rounded-sm border border-line bg-bg px-3 text-base tabular-nums outline-none focus:border-accent"
+                      value={draft[row.employee.id]?.incentive ?? String(incentive)}
+                      onChange={(event) =>
+                        setDraft((current) => ({
+                          ...current,
+                          [row.employee.id]: {
+                            basic: current[row.employee.id]?.basic ?? String(basic),
+                            incentive: event.target.value.replace(/[^\d]/g, ""),
+                          },
+                        }))
+                      }
+                    />
+                  </label>
+                </div>
+              ) : (
+                <p className="mt-2 text-lg tabular-nums">
+                  Basic {inr(basic)} · Incentive {inr(incentive)} · Given {inr(basic + incentive)}
+                </p>
+              )}
+              <div className="mt-3 flex flex-wrap gap-2">
+                {open ? (
+                  <Button
+                    variant="secondary"
+                    onClick={() => {
+                      setEditing(null);
+                    }}
+                  >
+                    Cancel
+                  </Button>
+                ) : (
+                  <Button
+                    variant="secondary"
+                    onClick={() => {
+                      setDraft((current) => ({ ...current, [row.employee.id]: { basic: String(basic), incentive: String(incentive) } }));
+                      setEditing(row.employee.id);
+                    }}
+                  >
+                    Edit
+                  </Button>
+                )}
+                <Button variant="secondary" onClick={() => write(row.employee.id, false)}>
+                  Save
+                </Button>
+                <Button onClick={() => write(row.employee.id, true)}>Confirm</Button>
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+      <ResultDialog result={result} onClose={() => setResult(null)} />
     </section>
   );
 }

@@ -126,26 +126,47 @@ function CounterPage() {
         }
       />
 
-      <section className="rounded-xl border border-line bg-surface p-5">
-        <p className="text-xs font-semibold tracking-widest text-faint">{role === "employee" ? "YOUR TOTAL" : day === today ? "ENTERED TODAY" : "ENTERED"}</p>
-        <p className="mt-1 font-display text-4xl tabular-nums">{inr(total)}</p>
-        {lines.length > 0 || gpayLines.length > 0 ? (
-          <p className="mt-2 text-base tabular-nums">
-            {lines.length > 0 ? `${lines.length}` : ""}
-            {gpayLines.length > 0 ? `${lines.length > 0 ? " · " : ""}Personal GPay ${inr(gpayTotal)}` : ""}
-          </p>
-        ) : null}
-        {gpayLines.length > 0 ? (
-          <p className="mt-1 text-base tabular-nums">
-            Service {inr(gpayService)} · Department {inr(gpayDepartment)}
-          </p>
-        ) : null}
-        {role === "admin" && unmatched.length > 0 ? (
-          <p className="mt-2 text-sm text-warn">
-            {unmatched.join(", ")} is not a staff name, so that amount is in the centre total only. Use the same name as on Salary.
-          </p>
-        ) : null}
-      </section>
+      {role === "employee" ? (
+        <section className="rounded-xl border border-line bg-surface p-5">
+          <p className="text-xs font-semibold tracking-widest text-faint">YOUR TOTAL TODAY</p>
+          <p className="mt-1 font-display text-5xl tabular-nums">{inr(total)}</p>
+        </section>
+      ) : (
+        <section className="grid gap-3 sm:grid-cols-2">
+          <div className="rounded-xl border border-line bg-surface p-5">
+            <p className="text-xs font-semibold tracking-widest text-faint">{day === today ? "ENTERED TODAY" : "ENTERED"}</p>
+            <p className="mt-1 font-display text-5xl tabular-nums">{inr(total)}</p>
+          </div>
+          <div className="rounded-xl border border-line bg-surface p-5">
+            <p className="text-xs font-semibold tracking-widest text-faint">CUSTOMERS</p>
+            <p className="mt-1 font-display text-5xl tabular-nums">{lines.length}</p>
+          </div>
+        </section>
+      )}
+      {gpayLines.length > 0 ? (
+        <p className="mt-3 text-base tabular-nums">
+          Personal GPay {inr(gpayTotal)} · Service {inr(gpayService)} · Department {inr(gpayDepartment)}
+        </p>
+      ) : null}
+      {role === "admin" && unmatched.length > 0 ? (
+        <p className="mt-2 text-sm text-warn">
+          {unmatched.join(", ")} is not a staff name, so that amount is in the centre total only. Use the same name as on Salary.
+        </p>
+      ) : null}
+
+      <div className="mt-4 grid grid-cols-3 gap-2">
+        {(
+          [
+            ["customers", "Today's customers"],
+            ["credit", "Credit"],
+            ["advance", "Advances"],
+          ] as const
+        ).map(([id, label]) => (
+          <Button key={id} type="button" className="min-h-12" variant={panel === id ? "primary" : "secondary"} onClick={() => setPanel(panel === id ? "" : id)}>
+            {label}
+          </Button>
+        ))}
+      </div>
 
       {role === "employee" && closed ? (
         <section className="mt-4 rounded-xl border border-line bg-surface p-5">
@@ -161,13 +182,25 @@ function CounterPage() {
           }}
         >
           <label className="block text-sm">
-            <span className="mb-1 block text-muted">Service</span>
+            <span className="mb-1 block font-medium text-ink">Service</span>
             <input
               list="akshaya-services"
-              className="h-11 w-full rounded-sm border border-line bg-bg px-3 text-base outline-none focus:border-accent"
+              className="h-12 w-full rounded-sm border border-line bg-bg px-3 text-base outline-none focus:border-accent"
               value={service}
               onChange={(event) => setService(event.target.value)}
             />
+            <div className="mt-2 flex flex-wrap gap-2">
+              {SERVICES.map((item) => (
+                <button
+                  key={item}
+                  type="button"
+                  className={`min-h-9 rounded-full border px-3 text-sm ${service === item ? "border-accent bg-accent text-accent-ink" : "border-line bg-bg text-ink"}`}
+                  onClick={() => setService(item)}
+                >
+                  {item}
+                </button>
+              ))}
+            </div>
             <datalist id="akshaya-services">
               {SERVICES.map((item) => (
                 <option key={item} value={item} />
@@ -175,27 +208,27 @@ function CounterPage() {
             </datalist>
           </label>
           <label className="block text-sm">
-            <span className="mb-1 block text-muted">Customer name</span>
+            <span className="mb-1 block font-medium text-ink">Customer name</span>
             <input
-              className="h-11 w-full rounded-sm border border-line bg-bg px-3 text-base outline-none focus:border-accent"
+              className="h-12 w-full rounded-sm border border-line bg-bg px-3 text-base outline-none focus:border-accent"
               value={customer}
               onChange={(event) => setCustomer(event.target.value)}
             />
           </label>
           <label className="block text-sm">
-            <span className="mb-1 block text-muted">Mobile, if any</span>
+            <span className="mb-1 block font-medium text-ink">Mobile, if any</span>
             <input
               inputMode="numeric"
-              className="h-11 w-full rounded-sm border border-line bg-bg px-3 text-base outline-none focus:border-accent"
+              className="h-12 w-full rounded-sm border border-line bg-bg px-3 text-base outline-none focus:border-accent"
               value={mobile}
               onChange={(event) => setMobile(event.target.value)}
             />
           </label>
           <label className="block text-sm">
-            <span className="mb-1 block text-muted">Service charge</span>
+            <span className="mb-1 block font-medium text-ink">Service charge</span>
             <input
               inputMode="numeric"
-              className="h-11 w-full rounded-sm border border-line bg-bg px-3 text-base outline-none focus:border-accent"
+              className="h-12 w-full rounded-sm border border-line bg-bg px-3 text-base outline-none focus:border-accent"
               value={amount}
               onChange={(event) => setAmount(event.target.value)}
             />
@@ -248,20 +281,6 @@ function CounterPage() {
         }}
       />
 
-      <div className="mt-4 flex flex-wrap gap-2">
-        {(
-          [
-            ["customers", "Today's customers"],
-            ["credit", "Credit"],
-            ["advance", "Advances"],
-          ] as const
-        ).map(([id, label]) => (
-          <Button key={id} type="button" variant={panel === id ? "primary" : "secondary"} onClick={() => setPanel(panel === id ? "" : id)}>
-            {label}
-          </Button>
-        ))}
-      </div>
-
       {panel === "customers" && role === "employee" ? (
         <section className="mt-4 rounded-xl border border-line bg-surface p-5">
           <h2 className="font-display text-2xl">Today's customers</h2>
@@ -284,7 +303,7 @@ function CounterPage() {
         <section className="mt-4 rounded-xl border border-line bg-surface p-5">
           <h2 className="font-display text-2xl">Today's customers</h2>
           {byStaff.size === 0 ? <p className="mt-2 text-sm text-muted">Nothing entered for this day.</p> : null}
-          <ul className="mt-2 divide-y divide-line">
+          <ul className="mt-3 max-w-xl divide-y divide-line">
             {[...byStaff.entries()].map(([name, value]) => {
               const count = lines.filter((line) => line.staff === name).length;
               const open = picked === name;
@@ -292,16 +311,15 @@ function CounterPage() {
                 <li key={name}>
                   <button
                     type="button"
-                    className="flex w-full items-center justify-between py-2 text-left text-sm"
+                    className="grid w-full grid-cols-[minmax(0,1fr)_3.5rem_7.5rem] items-baseline gap-4 py-3 text-left"
                     onClick={() => {
                       setPicked(open ? "" : name);
                       setEditing(null);
                     }}
                   >
-                    <span className="font-medium">{name}</span>
-                    <span className="tabular-nums text-muted">
-                      {count} · {inr(value)}
-                    </span>
+                    <span className="text-base font-medium">{name}</span>
+                    <span className="text-right text-base tabular-nums text-muted">{count}</span>
+                    <span className="text-right text-lg font-medium tabular-nums">{inr(value)}</span>
                   </button>
                   {open ? (
                     <CustomerLines
@@ -352,8 +370,8 @@ function CustomerLines({
           <EditCharge key={line.id} line={line} onClose={() => onEdit(null)} onResult={onResult} />
         ) : (
           <li key={line.id} className="rounded-lg border border-line px-3 py-2 text-sm">
-            <div className="flex items-start justify-between gap-3">
-              <div>
+            <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
+              <div className="min-w-48">
                 <p className="font-medium">{line.customer}</p>
                 <p className="text-xs text-faint">
                   {line.service}
@@ -363,8 +381,8 @@ function CustomerLines({
                     : ""}
                 </p>
               </div>
-              <div className="flex items-center gap-2">
-                <span className="tabular-nums">{inr(line.amount)}</span>
+              <span className="text-lg font-medium tabular-nums">{inr(line.amount)}</span>
+              <div className="ml-auto flex items-center gap-2">
                 {locked ? null : (
                   <Button size="sm" variant="secondary" onClick={() => onEdit(line)}>
                     Edit

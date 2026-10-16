@@ -40,6 +40,7 @@ function StaffPage() {
     centre,
     book.deductLwp,
     today,
+    book.salaryPaid ?? [],
   ).sort((a, b) => b.collection - a.collection);
   const selectedId = rows.some((row) => row.employee.id === search.e) ? (search.e ?? "") : (rows[0]?.employee.id ?? "");
   const selected = rows.find((row) => row.employee.id === selectedId);
@@ -57,6 +58,7 @@ function StaffPage() {
           collection,
           book.deductLwp,
           today,
+          book.salaryPaid ?? [],
         );
         const mine = people.find((person) => person.employee.id === selected.employee.id);
         return {
@@ -85,6 +87,8 @@ function StaffPage() {
       row.month,
       book.deductLwp,
       today,
+      book.payouts ?? [],
+      book.salaryPaid ?? [],
     );
     return sum + snap.collection;
   }, 0);

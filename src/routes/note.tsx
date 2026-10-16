@@ -4,7 +4,7 @@ import { MonthBar } from "@/components/month-bar";
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import { useCurrentUserState } from "@/lib/auth/use-current-user";
-import { addNotice, listNotices, myRole, removeNotice } from "@/lib/centre.functions";
+import { addNotice, listNotices, markNoticesSeen, myRole, removeNotice } from "@/lib/centre.functions";
 import { cn } from "@/lib/cn";
 import {
   centreSnapshot,
@@ -56,6 +56,7 @@ function NotePage() {
     centre,
     book.deductLwp,
     today,
+    book.salaryPaid ?? [],
   );
   const people = rows.map((row) => row.employee);
   const own = book.employees.find((employee) => employee.name.trim().toLowerCase() === (user?.displayName ?? "").trim().toLowerCase());
@@ -71,6 +72,7 @@ function NotePage() {
     monthCollection(book.days, priorMonth),
     book.deductLwp,
     "",
+    book.salaryPaid ?? [],
   );
   const centreGrowthPct = centreSnapshot(
     book.employees,
@@ -84,6 +86,7 @@ function NotePage() {
     book.deductLwp,
     today,
     book.payouts ?? [],
+    book.salaryPaid ?? [],
   ).growthPct;
   const through = today && today.startsWith(month) ? today : (datesInMonth(month).at(-1) ?? `${month}-28`);
   const pace = {
@@ -98,8 +101,8 @@ function NotePage() {
   return (
     <div>
       <PageHeader
-        kicker="NOTICE"
-        title="Notice board"
+        kicker="MESSAGE"
+        title="Message"
         actions={
           cardOpen ? (
           <div className="flex flex-wrap items-center gap-2">
@@ -188,11 +191,20 @@ function NoticeBoard({ admin }: { admin: boolean }) {
   const [text, setText] = useState("");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
+  const [received, setReceived] = useState(false);
 
   const load = () => {
     void listNotices()
-      .then((book) => setLines(book.lines))
-      .catch((caught: unknown) => setError(caught instanceof Error ? caught.message : "Notices did not open."));
+      .then((book) => {
+        setLines(book.lines);
+        if (!admin && book.unread > 0) {
+          setReceived(true);
+          void markNoticesSeen()
+            .then(() => window.dispatchEvent(new Event("messages-seen")))
+            .catch(() => undefined);
+        }
+      })
+      .catch((caught: unknown) => setError(caught instanceof Error ? caught.message : "Messages did not open."));
   };
 
   useEffect(() => {
@@ -231,6 +243,7 @@ function NoticeBoard({ admin }: { admin: boolean }) {
           </div>
         </form>
       ) : null}
+      {received ? <p className="mb-3 rounded-lg bg-accent-soft px-3 py-2 text-sm font-medium text-accent">Message received</p> : null}
       {error ? <p className="mb-3 text-sm text-bad">{error}</p> : null}
       {lines.length === 0 ? <p className="text-sm text-muted">No message yet.</p> : null}
       <ul className="divide-y divide-line">

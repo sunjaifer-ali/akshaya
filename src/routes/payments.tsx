@@ -40,7 +40,7 @@ function PaymentsPage() {
     load();
   }, [date]);
 
-  const todayRows = rows.filter((row) => row.date === date);
+  const todayRows = rows.filter((row) => row.date === date && (role !== "employee" || row.mine));
   const monthRows = rows.filter((row) => row.date !== date && row.date.startsWith(date.slice(0, 7)));
   const earlierDays = [...new Set(monthRows.map((row) => row.date))].sort((a, b) => (a < b ? 1 : -1));
   const total = todayRows.reduce((sum, row) => sum + row.amount, 0);
@@ -54,7 +54,11 @@ function PaymentsPage() {
         kicker="PAYMENTS"
         title="Paid from the centre"
       />
-      <p className="mb-4 font-display text-3xl tabular-nums">{inr(total)}</p>
+      <section className="mb-4 rounded-xl border border-line bg-surface p-5">
+        <p className="text-xs font-semibold tracking-widest text-faint">PAID TODAY</p>
+        <p className="mt-1 font-display text-5xl tabular-nums">{inr(total)}</p>
+        {role !== "employee" && monthTotal > total ? <p className="mt-2 text-sm text-muted">This month {inr(monthTotal)}</p> : null}
+      </section>
       {locked ? <p className="mb-4 text-sm text-muted">This day is closed. A new day starts tomorrow.</p> : null}
       <form
         className="grid gap-3 rounded-xl border border-line bg-surface p-5 sm:grid-cols-2"

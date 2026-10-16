@@ -30,7 +30,7 @@ import { cn } from "@/lib/cn";
 import { authEnabled, deskIsOpen, signOut } from "@/lib/auth/client";
 import { RedirectToSignIn, UserButton } from "@/lib/auth/gates";
 import { useCurrentUserState } from "@/lib/auth/use-current-user";
-import { myRole, recordLogin, type CentreRole } from "@/lib/centre.functions";
+import { myRole, listNotices, recordLogin, type CentreRole } from "@/lib/centre.functions";
 import { hydrateLedger, useLedger } from "@/lib/ledger/store";
 import { pullSharedCloses, sharedBookMissing, startSharing, watchAdminBook } from "@/lib/ledger/share";
 import { useMounted } from "@/lib/use-mounted";
@@ -50,7 +50,7 @@ const NAV = [
   { to: "/leave", label: "Leave", icon: CalendarDays, group: "People", mobile: false },
   { to: "/centre", label: "Centre", icon: BarChart3, group: "Review", mobile: false },
   { to: "/reports", label: "Reports", icon: ClipboardList, group: "Review", mobile: false },
-  { to: "/note", label: "Notice board", icon: NotebookPen, group: "Review", mobile: false },
+  { to: "/note", label: "Message", icon: NotebookPen, group: "Review", mobile: false },
 ] as const;
 
 const GROUPS = ["Today", "Money", "People", "Review"] as const;
@@ -62,7 +62,7 @@ const MORE_LABEL: Record<(typeof NAV)[number]["to"], string> = {
   "/payments": "Payments",
   "/credit": "Credit and advances",
   "/diary": "Diary",
-  "/note": "Notice board",
+  "/note": "Message",
   "/collections": "Collections",
   "/closing": "Daily closing",
   "/salary": "Salary",
@@ -90,6 +90,7 @@ export function Shell({ children }: { children: ReactNode }) {
   const userId = user?.id ?? "";
   const [role, setRole] = useState<CentreRole | null | "loading">(authEnabled ? "loading" : "admin");
   const [blocked, setBlocked] = useState("");
+  const [unreadMessages, setUnreadMessages] = useState(0);
 
   useEffect(() => {
     hydrateLedger();
@@ -158,6 +159,19 @@ export function Shell({ children }: { children: ReactNode }) {
     return pullSharedCloses();
   }, 20000, [role, pathname]);
 
+  useEffect(() => {
+    const clear = () => setUnreadMessages(0);
+    window.addEventListener("messages-seen", clear);
+    return () => window.removeEventListener("messages-seen", clear);
+  }, []);
+
+  useRefresh(() => {
+    if (role !== "employee") return;
+    return listNotices()
+      .then((book) => setUnreadMessages(book.unread))
+      .catch(() => undefined);
+  }, 15000, [role, pathname]);
+
   if (pathname === "/login") return <>{children}</>;
 
   if (authEnabled && (!mounted || isPending || (user && role === "loading"))) {
@@ -206,11 +220,12 @@ export function Shell({ children }: { children: ReactNode }) {
           <img src="/akshaya-logo.png" alt="" className="mx-auto h-auto w-16" />
           <p className="mt-2 font-display text-2xl leading-none text-ink">Thrikkadeeri</p>
           <p className="mt-1 text-xs tracking-wide text-faint">Centre book</p>
+          {role === "employee" && user?.displayName ? <p className="mt-2 text-sm font-medium text-accent">{user.displayName}</p> : null}
         </Link>
         <nav className="flex min-h-0 flex-1 flex-col overflow-y-auto px-3 py-3">
           {role === "employee" ? (
             links.map((item) => (
-              <NavLink key={item.to} to={item.to} label={item.label} icon={item.icon} active={isActive(pathname, item.to)} />
+              <NavLink key={item.to} to={item.to} label={item.label} icon={item.icon} active={isActive(pathname, item.to)} badge={item.to === "/note" ? unreadMessages : 0} />
             ))
           ) : (
             GROUPS.map((group) => {
@@ -220,7 +235,7 @@ export function Shell({ children }: { children: ReactNode }) {
                 <div key={group} className="mb-3 last:mb-0">
                   <p className="px-3 pb-1 text-[10px] font-semibold tracking-[0.16em] text-faint">{group.toUpperCase()}</p>
                   {items.map((item) => (
-                    <NavLink key={item.to} to={item.to} label={item.label} icon={item.icon} active={isActive(pathname, item.to)} />
+                    <NavLink key={item.to} to={item.to} label={item.label} icon={item.icon} active={isActive(pathname, item.to)} badge={item.to === "/note" ? unreadMessages : 0} />
                   ))}
                 </div>
               );
@@ -313,6 +328,11 @@ export function Shell({ children }: { children: ReactNode }) {
               </div>
             </div>
           ) : null}
+          {children && role === "employee" && unreadMessages > 0 && pathname !== "/note" ? (
+            <Link to="/note" className="no-print mb-4 block rounded-lg border border-accent bg-accent-soft px-4 py-3 text-sm font-medium text-accent">
+              Message received
+            </Link>
+          ) : null}
           {children}
         </main>
       </div>
@@ -330,7 +350,8 @@ export function Shell({ children }: { children: ReactNode }) {
               )}
             >
               <item.icon className="size-4" />
-              {item.label === "Collections" ? "Cash" : item.label === "Personal GPay" ? "GPay" : item.label === "Notice board" ? "Notice" : item.label}
+              {item.label === "Collections" ? "Cash" : item.label === "Personal GPay" ? "GPay" : item.label}
+              {item.to === "/note" && unreadMessages > 0 ? <span className="text-[10px] font-medium text-accent">New</span> : null}
             </Link>
           ))}
           {role === "admin" ? (
@@ -392,11 +413,13 @@ function NavLink({
   label,
   icon: Icon,
   active,
+  badge = 0,
 }: {
   to: (typeof NAV)[number]["to"];
   label: string;
   icon: (typeof NAV)[number]["icon"];
   active: boolean;
+  badge?: number;
 }) {
   return (
     <Link
@@ -407,7 +430,8 @@ function NavLink({
       )}
     >
       <Icon className={cn("size-4", active ? "text-accent" : "text-muted")} />
-      {label}
+      <span className="min-w-0 flex-1">{label}</span>
+      {badge > 0 ? <span className="rounded-full bg-accent px-2 py-0.5 text-[10px] font-medium text-accent-ink">New</span> : null}
     </Link>
   );
 }

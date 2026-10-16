@@ -6,6 +6,7 @@ import type {
   LeaveCode,
   LeaveMark,
   PerfOverride,
+  SalaryPaid,
 } from "@/lib/ledger/types";
 
 export function monthDays(days: CollectionDay[], month: string): CollectionDay[] {
@@ -249,6 +250,7 @@ export function staffMonthRows(
   centreCollection: number,
   deductLwp: boolean,
   asOf = "",
+  salaryPaid: SalaryPaid[] = [],
 ): StaffMonthRow[] {
   const full = workingDaysInMonth(month, holidays);
   const inProgress = Boolean(asOf) && asOf.slice(0, 7) === month;
@@ -277,7 +279,11 @@ export function staffMonthRows(
           mark.date.startsWith(month) &&
           (!inProgress || mark.date <= asOf),
       ).length;
-      const pay = payFor(employee, perf.amount, lwp + half * 0.5, full, elapsed, deductLwp);
+      const pay = applyPaidSalary(
+        payFor(employee, perf.amount, lwp + half * 0.5, full, elapsed, deductLwp),
+        salaryPaid.find((item) => item.confirmed && item.employeeId === employee.id && item.month === month),
+        perf.amount,
+      );
       return {
         employee,
         collection: perf.amount,
@@ -290,6 +296,22 @@ export function staffMonthRows(
 
 export function salaryTotal(rows: StaffMonthRow[]): number {
   return rows.reduce((sum, row) => sum + row.pay.gross, 0);
+}
+
+function applyPaidSalary(pay: PayBreakdown, paid: SalaryPaid | undefined, collection: number): PayBreakdown {
+  if (!paid) return pay;
+  const basicPayable = Math.max(0, Math.round(paid.basic) || 0);
+  const incentive = Math.max(0, Math.round(paid.incentive) || 0);
+  const gross = basicPayable + incentive;
+  return {
+    ...pay,
+    basicPayable,
+    incentive,
+    gross,
+    salaryPct: collection > 0 ? (basicPayable / collection) * 100 : null,
+    incentivePct: collection > 0 ? (incentive / collection) * 100 : null,
+    payPct: collection > 0 ? (gross / collection) * 100 : null,
+  };
 }
 
 export type Desk = "aadhaar" | "service" | "new";
@@ -445,6 +467,7 @@ export function centreSnapshot(
   deductLwp: boolean,
   asOf = "",
   payouts: CentrePayout[] = [],
+  salaryPaid: SalaryPaid[] = [],
 ): CentreSnapshot {
   const collection = monthCollection(days, month);
   const rows = staffMonthRows(
@@ -457,6 +480,7 @@ export function centreSnapshot(
     collection,
     deductLwp,
     asOf,
+    salaryPaid,
   );
   const expense = expenseTotal(expenses, month) + payoutTotal(payouts, month);
   const basicPay = rows.reduce((sum, row) => sum + row.pay.basicPayable, 0);

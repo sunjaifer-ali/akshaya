@@ -50,6 +50,7 @@ function ReportsPage() {
       book.deductLwp,
       today,
       book.payouts ?? [],
+      book.salaryPaid ?? [],
     ),
   );
   const shown = snaps.filter((row) => monthCounts(row, anchor, book.leaves));
@@ -65,6 +66,7 @@ function ReportsPage() {
       row.collection,
       book.deductLwp,
       today,
+      book.salaryPaid ?? [],
     ),
   }));
 

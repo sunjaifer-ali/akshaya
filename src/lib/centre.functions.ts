@@ -693,6 +693,10 @@ export const closingAdvance = createServerFn({ method: "GET" })
     const { getSql } = await import("@/lib/db");
     const sql = await getSql();
     await ensureAdvanceTable(sql);
+    return readClosingAdvance(sql, date);
+  });
+
+async function readClosingAdvance(sql: Awaited<ReturnType<typeof import("@/lib/db").getSql>>, date: string) {
     const released = await releaseAdvanceCharges(sql);
     if (released.length > 0) {
       try {
@@ -747,6 +751,49 @@ export const closingAdvance = createServerFn({ method: "GET" })
     const taken = received;
     const served = used;
     return { held: heldOf(date), lastDate, lastHeld: last ? heldOf(last.date) : 0, received, used, served, taken, open, paid, tracked: rows.length > 0 };
+}
+
+function shiftDay(date: string, days: number): string {
+  const [year, month, day] = date.split("-").map(Number);
+  const next = new Date(Date.UTC(year, month - 1, day + days));
+  return next.toISOString().slice(0, 10);
+}
+
+export const closingDesk = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
+  .validator((date: string) => {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error("Pick a date.");
+    return date;
+  })
+  .handler(async ({ context, data: date }) => {
+    await requireClose(context.userId);
+    const { getSql } = await import("@/lib/db");
+    const sql = await getSql();
+    await ensureCustomerTable(sql);
+    await ensureAdvanceTable(sql);
+    await ensureServiceTable(sql);
+    const position = await positionAsOf(sql, date);
+    const advance = await readClosingAdvance(sql, date);
+    const payouts = (await readPayouts(sql, context.userId)).map(({ mine: _mine, ...item }) => item);
+    const from = shiftDay(date, -40);
+    const gpay = await sql<{ taken_on: string; service: number; department: number }>`
+      select taken_on::text as taken_on,
+        coalesce(sum(amount), 0)::int as service,
+        coalesce(sum(department), 0)::int as department
+      from service_entry
+      where personal_gpay and taken_on >= ${from} and taken_on <= ${date}
+      group by taken_on
+    `;
+    return {
+      credit: { given: position.given, paid: position.paid, unpaid: position.unpaid },
+      advance,
+      payouts,
+      gpay: gpay.map((row) => ({
+        date: String(row.taken_on).slice(0, 10),
+        service: Number(row.service) || 0,
+        department: Number(row.department) || 0,
+      })),
+    };
   });
 
 export const addAdvance = createServerFn({ method: "POST" })
@@ -1087,7 +1134,7 @@ export const listCentrePayouts = createServerFn({ method: "GET" })
     return {
       role,
       closed,
-      rows: role === "employee" ? list.filter((row) => row.date === date) : list,
+      rows: role === "employee" ? list.filter((row) => row.date === date && row.mine) : list,
     };
   });
 
@@ -1359,7 +1406,15 @@ export const loadSharedBook = createServerFn({ method: "GET" })
     `;
     const row = rows[0];
     if (!row) return null;
-    const stored = asJson(row.data);
+    let stored = asJson(row.data);
+    if (indiaClock() >= "14:00:00") {
+      const clocks = await todayStaffClocks(sql, stored);
+      const marked = applyLiveHalfDay(stored, clocks);
+      if (!sameLeaves(stored.leaves ?? [], marked.leaves ?? [])) {
+        await writeBook(sql, marked, asJson(row.touches) ?? {});
+        stored = marked;
+      }
+    }
     const savedPayouts = stored.payouts ?? [];
     delete stored.payouts;
     const fromTable = role === "employee" ? [] : (await readPayouts(sql, context.userId)).map(({ mine: _mine, ...item }) => item);
@@ -1481,6 +1536,7 @@ export const personalGpaySpan = createServerFn({ method: "GET" })
       select taken_on::text as taken_on, staff_name as staff, customer, mobile, service, amount, department
       from service_entry
       where personal_gpay and taken_on >= ${from} and taken_on <= ${to}
+        and (${role !== "employee"}::boolean or user_id = ${context.userId})
       order by taken_on desc, created_at desc
     `;
     return {
@@ -1499,24 +1555,59 @@ export const personalGpaySpan = createServerFn({ method: "GET" })
     };
   });
 
+async function ensureNoticeTables(sql: Awaited<ReturnType<typeof import("@/lib/db").getSql>>) {
+  await sql.query(
+    `create table if not exists centre_notice (
+      id text primary key,
+      body text not null,
+      author text not null,
+      created_at timestamptz not null default now()
+    )`,
+  );
+  await sql.query(
+    `create table if not exists centre_notice_seen (
+      user_id text not null,
+      notice_id text not null,
+      primary key (user_id, notice_id)
+    )`,
+  );
+}
+
 export const listNotices = createServerFn({ method: "GET" })
   .middleware([authMiddleware])
   .handler(async ({ context }) => {
     await requireMember(context.userId);
     const { getSql } = await import("@/lib/db");
     const sql = await getSql();
-    await sql.query(
-      `create table if not exists centre_notice (
-        id text primary key,
-        body text not null,
-        author text not null,
-        created_at timestamptz not null default now()
-      )`,
-    );
+    await ensureNoticeTables(sql);
     const rows = await sql<{ id: string; body: string; author: string; at: string }>`
       select id, body, author, created_at::text as at from centre_notice order by created_at desc limit 30
     `;
-    return { lines: rows.map((row) => ({ id: row.id, body: row.body, author: row.author, at: String(row.at).slice(0, 16).replace("T", " ") })) };
+    const unread = await sql<{ total: number }>`
+      select count(*)::int as total from centre_notice n
+      where not exists (
+        select 1 from centre_notice_seen s where s.notice_id = n.id and s.user_id = ${context.userId}
+      )
+    `;
+    return {
+      unread: Number(unread[0]?.total ?? 0),
+      lines: rows.map((row) => ({ id: row.id, body: row.body, author: row.author, at: String(row.at).slice(0, 16).replace("T", " ") })),
+    };
+  });
+
+export const markNoticesSeen = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .handler(async ({ context }) => {
+    await requireMember(context.userId);
+    const { getSql } = await import("@/lib/db");
+    const sql = await getSql();
+    await ensureNoticeTables(sql);
+    await sql`
+      insert into centre_notice_seen (user_id, notice_id)
+      select ${context.userId}, id from centre_notice
+      on conflict (user_id, notice_id) do nothing
+    `;
+    return { ok: true };
   });
 
 export const addNotice = createServerFn({ method: "POST" })
@@ -1530,7 +1621,7 @@ export const addNotice = createServerFn({ method: "POST" })
     await requireAdmin(context.userId);
     const { getSql } = await import("@/lib/db");
     const sql = await getSql();
-    await sql.query(`create table if not exists centre_notice (id text primary key, body text not null, author text not null, created_at timestamptz not null default now())`);
+    await ensureNoticeTables(sql);
     const member = await sql<{ name: string }>`select name from centre_member where user_id = ${context.userId}`;
     await sql`insert into centre_notice (id, body, author) values (${crypto.randomUUID()}, ${data}, ${member[0]?.name || "Admin"})`;
     return { ok: true };
@@ -1839,7 +1930,7 @@ async function resyncCounterSplits(
     from service_entry group by taken_on
   `;
   const bankByDate = new Map(bankRows.map((entry) => [String(entry.taken_on).slice(0, 10), Number(entry.amount) || 0]));
-  if (rows.length === 0) return { book, dates: [] };
+  if (rows.length === 0) return { book: applyLiveHalfDay(book, clockByDate.get(indiaToday()) ?? new Map()), dates: [] };
   await ensureCustomerTable(sql);
   const creditRows = await sql<{ taken_on: string; amount: number }>`
     select s.taken_on::text as taken_on, coalesce(sum(s.amount), 0)::int as amount
@@ -1888,6 +1979,7 @@ async function resyncCounterSplits(
   for (const date of byDate.keys()) {
     if (date < today) next = applyImportedLeave(next, date, clockByDate.get(date));
   }
+  next = applyLiveHalfDay(next, clockByDate.get(today) ?? new Map());
   return { book: next, dates: [...byDate.keys()] };
 }
 
@@ -1911,6 +2003,56 @@ function wallClock(value: unknown): string {
 
 function indiaToday(): string {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(new Date());
+}
+
+function indiaClock(): string {
+  return new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" }).format(new Date()).slice(0, 8);
+}
+
+function sameLeaves(left: { employeeId: string; date: string; code: string }[], right: { employeeId: string; date: string; code: string }[]): boolean {
+  if (left.length !== right.length) return false;
+  const key = (mark: { employeeId: string; date: string; code: string }) => `${mark.employeeId}|${mark.date}|${mark.code}`;
+  const a = left.map(key).sort();
+  const b = right.map(key).sort();
+  return a.every((item, index) => item === b[index]);
+}
+
+async function todayStaffClocks(
+  sql: Awaited<ReturnType<typeof import("@/lib/db").getSql>>,
+  book: LedgerData,
+): Promise<Map<string, { first: string; last: string }>> {
+  await ensureServiceTable(sql);
+  const today = indiaToday();
+  const rows = await sql<{ staff_name: string; first_at: string }>`
+    select staff_name, to_char(min(created_at at time zone 'Asia/Kolkata'), 'HH24:MI:SS') as first_at
+    from service_entry where taken_on = ${today} group by staff_name
+  `;
+  const clocks = new Map<string, { first: string; last: string }>();
+  for (const entry of rows) {
+    const employee = (book.employees ?? []).find((person) => normStaffName(person.name) === normStaffName(entry.staff_name));
+    if (!employee) continue;
+    clocks.set(employee.id, { first: entry.first_at, last: entry.first_at });
+  }
+  return clocks;
+}
+
+/** Same-day half day. A first charge after 12:00 is half day. No charge at all by 14:00 is half day too. */
+function applyLiveHalfDay(book: LedgerData, clocks: Map<string, { first: string; last: string }>): LedgerData {
+  const date = indiaToday();
+  if (isSunday(date) || (book.holidays ?? []).includes(date)) return book;
+  const afterTwo = indiaClock() >= "14:00:00";
+  let leaves = [...(book.leaves ?? [])];
+  for (const employee of book.employees ?? []) {
+    if (!employee.active) continue;
+    const previous = (book.leaves ?? []).find((mark) => mark.employeeId === employee.id && mark.date === date);
+    if (previous && previous.code !== "HD" && previous.code !== "LWP") continue;
+    const first = wallClock(clocks.get(employee.id)?.first);
+    const worked = first !== "";
+    const code = worked ? (first > "12:00:00" ? "HD" : null) : afterTwo ? "HD" : null;
+    leaves = leaves.filter((mark) => mark.employeeId !== employee.id || mark.date !== date || (mark.code !== "HD" && mark.code !== "LWP"));
+    if (code) leaves.push({ employeeId: employee.id, date, code });
+  }
+  return { ...book, leaves };
 }
 
 async function ensureServiceTable(sql: Awaited<ReturnType<typeof import("@/lib/db").getSql>>) {
@@ -2205,6 +2347,7 @@ function archiveBook(value: unknown): LedgerData | null {
     lyOverrides: book.lyOverrides ?? {},
     cashCloses: Array.isArray(book.cashCloses) ? book.cashCloses : [],
     payouts: Array.isArray(book.payouts) ? book.payouts : [],
+    salaryPaid: Array.isArray(book.salaryPaid) ? book.salaryPaid : [],
   };
 }
 

@@ -33,6 +33,7 @@ function CollectionsPage() {
     total,
     book.deductLwp,
     today,
+    book.salaryPaid ?? [],
   );
   const attributed = rows.reduce((sum, row) => sum + row.collection, 0);
   const gap = total - attributed;

@@ -44,6 +44,7 @@ function CentrePage() {
       book.deductLwp,
       today,
       book.payouts ?? [],
+      book.salaryPaid ?? [],
     ),
   );
   const visible = rows.filter((row) => row.month <= anchor || row.collection > 0 || row.expense > 0);

@@ -37,6 +37,7 @@ function snapshot(): LedgerData {
     lyOverrides: state.lyOverrides,
     cashCloses: state.cashCloses,
     payouts: state.payouts ?? [],
+    salaryPaid: state.salaryPaid ?? [],
   };
 }
 
@@ -48,6 +49,7 @@ function asBook(book: LedgerData): LedgerData {
     lyOverrides: book.lyOverrides ?? {},
     cashCloses: book.cashCloses ?? [],
     payouts: book.payouts ?? [],
+    salaryPaid: book.salaryPaid ?? [],
     categories: withCategories(book.categories),
   };
 }

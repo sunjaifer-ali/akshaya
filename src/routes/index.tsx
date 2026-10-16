@@ -37,6 +37,7 @@ function DeskPage() {
     book.deductLwp,
     today,
     book.payouts ?? [],
+    book.salaryPaid ?? [],
   );
   const rows = staffMonthRows(
     book.employees,
@@ -48,6 +49,7 @@ function DeskPage() {
     snap.collection,
     book.deductLwp,
     today,
+    book.salaryPaid ?? [],
   );
   const onLeave = today
     ? book.leaves.filter((mark) => mark.date === today && mark.code !== "HD")

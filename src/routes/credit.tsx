@@ -40,6 +40,7 @@ function CreditPage() {
   const [downloading, setDownloading] = useState(false);
   const [result, setResult] = useState<Result | null>(null);
   const [tab, setTab] = useState<"credit" | "advance">("credit");
+  const [day, setDay] = useState("");
 
   const load = () => {
     void customerCreditDesk({ data: month })
@@ -54,6 +55,13 @@ function CreditPage() {
   };
 
   useRefresh(load, 15000, [month]);
+
+  const givenLines = lines.filter((line) => line.kind === "credit" && (!day || line.date === day));
+  const paidLines = lines.filter((line) => line.kind === "debit" && (!day || line.date === day));
+  const monthGiven = lines.filter((line) => line.kind === "credit").reduce((sum, line) => sum + line.amount, 0);
+  const monthPaid = lines.filter((line) => line.kind === "debit").reduce((sum, line) => sum + line.amount, 0);
+  const stillUnpaid = open.reduce((sum, line) => sum + line.balance, 0);
+  const movementDates = [...new Set(lines.map((line) => line.date))].sort((a, b) => (a < b ? 1 : -1));
 
   return (
     <div>
@@ -98,6 +106,7 @@ function CreditPage() {
             <MonthBar
               month={month}
               onChange={(next) => {
+                setDay("");
                 void navigate({ search: { m: next } });
               }}
             />
@@ -129,18 +138,21 @@ function CreditPage() {
       {tab === "advance" ? <AdvanceBlock month={month} /> : null}
       {tab === "credit" ? (
       <>
-      <section className="grid gap-3 sm:grid-cols-2">
-        <div className="rounded-xl border border-line bg-surface p-5">
-          <p className="text-xs font-semibold tracking-widest text-faint">{role === "admin" ? "CREDIT TODAY" : "YOUR CREDIT TODAY"}</p>
-          <p className="mt-1 font-display text-4xl tabular-nums">{inr(credit)}</p>
-        </div>
-        <div className="rounded-xl border border-line bg-surface p-5">
-          <p className="text-xs font-semibold tracking-widest text-faint">{role === "admin" ? "DEBIT TODAY" : "YOUR DEBIT TODAY"}</p>
-          <p className="mt-1 font-display text-4xl tabular-nums">{inr(debit)}</p>
-        </div>
+      <section className="grid gap-3 sm:grid-cols-3">
+        <TotalTile label="Credit given" value={role === "admin" ? monthGiven : credit} note={role === "admin" ? `${formatMonth(month)} · today ${inr(credit)}` : "Today"} tone="bad" />
+        <TotalTile label="Credit received" value={role === "admin" ? monthPaid : debit} note={role === "admin" ? `${formatMonth(month)} · today ${inr(debit)}` : "Today"} tone="good" />
+        <TotalTile label="Still unpaid" value={stillUnpaid} note="Open credit" tone="ink" />
       </section>
+      {role === "admin" ? (
+        <div className="mt-4">
+          <DaySelect value={day} dates={movementDates} onChange={setDay} />
+        </div>
+      ) : null}
+      <div className="mt-4 grid items-start gap-4 lg:grid-cols-2">
+      <section className="rounded-xl border border-line border-l-4 border-l-bad bg-surface p-5">
+        <h2 className="font-display text-2xl">Credit given</h2>
       <form
-        className="mt-4 grid gap-3 rounded-xl border border-line bg-surface p-5"
+        className="mt-4 grid gap-3"
         onSubmit={(event) => {
           event.preventDefault();
           setPending(true);
@@ -189,8 +201,12 @@ function CreditPage() {
         </Button>
       </form>
       {notice ? <p className="mt-3 text-sm text-muted">{notice}</p> : null}
-      <section className="mt-4 rounded-xl border border-line bg-surface p-5">
-        <h2 className="font-display text-2xl">Still unpaid</h2>
+      {role === "admin" ? <MoveList lines={givenLines} empty="No credit given in this view." onDelete={(id) => deleteMove(id, setResult, load)} /> : null}
+      </section>
+      <section className="rounded-xl border border-line border-l-4 border-l-accent bg-surface p-5">
+        <h2 className="font-display text-2xl">Credit received</h2>
+      <section className="mt-4">
+        <h3 className="font-medium">Still unpaid</h3>
         {open.length === 0 ? <p className="mt-2 text-sm text-muted">Nobody owes money.</p> : null}
         {byMonth(open).map((group) => (
           <div key={group.month}>
@@ -269,51 +285,9 @@ function CreditPage() {
           </div>
         ))}
       </section>
-      {role === "admin" ? (
-        <section className="mt-4 rounded-xl border border-line bg-surface p-5">
-          <h2 className="font-display text-2xl">{formatMonth(month)}</h2>
-          <p className="mt-1 text-sm text-muted">
-            Credit {inr(lines.filter((line) => line.kind === "credit").reduce((sum, line) => sum + line.amount, 0))} · Payments{" "}
-            {inr(lines.filter((line) => line.kind === "debit").reduce((sum, line) => sum + line.amount, 0))}
-          </p>
-          {lines.length === 0 ? <p className="mt-2 text-sm text-muted">No credit in this month.</p> : null}
-          {byDay(lines).map((day) => (
-            <div key={day.date}>
-              <h3 className="mt-4 text-xs font-semibold tracking-widest text-faint">{formatDay(day.date)}</h3>
-              <ul className="divide-y divide-line">
-                {day.rows.map((line) => (
-                  <li key={line.id} className="flex items-center justify-between gap-3 py-2 text-sm">
-                    <span>
-                      {line.staff} · {line.customer}
-                      <span className="mt-0.5 block text-xs text-faint">
-                        {line.kind === "credit" ? "Credit" : "Payment"}
-                        {line.mobile ? ` · ${line.mobile}` : ""}
-                      </span>
-                    </span>
-                    <span className="flex items-center gap-3">
-                      <span className="tabular-nums">{inr(line.amount)}</span>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => {
-                          void removeCustomerMove({ data: line.id })
-                            .then(() => {
-                              setResult({ ok: true, message: "Entry successfully deleted." });
-                              load();
-                            })
-                            .catch((error: unknown) => setResult({ ok: false, message: error instanceof Error ? error.message : "Not deleted." }));
-                        }}
-                      >
-                        Delete
-                      </Button>
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ))}
-        </section>
-      ) : null}
+      {role === "admin" ? <MoveList lines={paidLines} empty="No credit received in this view." onDelete={(id) => deleteMove(id, setResult, load)} /> : null}
+      </section>
+      </div>
       </>
       ) : null}
       <ResultDialog result={result} onClose={() => setResult(null)} />
@@ -336,6 +310,7 @@ function AdvanceBlock({ month }: { month: string }) {
   const [edit, setEdit] = useState<{ id: string; customer: string; mobile: string; service: string; amount: string } | null>(null);
   const [pending, setPending] = useState(false);
   const [result, setResult] = useState<Result | null>(null);
+  const [servedDay, setServedDay] = useState("");
 
   const load = () => {
     void advanceDesk()
@@ -351,14 +326,32 @@ function AdvanceBlock({ month }: { month: string }) {
 
   useRefresh(load, 15000, []);
 
+  const servedMonth = paid.filter((line) => line.used.startsWith(month));
+  const servedTotal = servedMonth.reduce((sum, line) => sum + line.amount, 0);
+  const receivedMonth =
+    open.filter((line) => line.date.startsWith(month)).reduce((sum, line) => sum + line.amount, 0) +
+    paid.filter((line) => line.date.startsWith(month)).reduce((sum, line) => sum + line.amount, 0);
+  const servedDates = [...new Set(servedMonth.map((line) => line.used))].sort((a, b) => (a < b ? 1 : -1));
+  const shownDay = servedDay.startsWith(month) ? servedDay : "";
+  const servedRows = servedMonth.filter((line) => !shownDay || line.used === shownDay);
+
   return (
-    <section className="mt-4 rounded-xl border border-line bg-surface p-5">
+    <>
+      <section className="grid gap-3 sm:grid-cols-3">
+        <TotalTile label="Advance received" value={receivedMonth} note={`${formatMonth(month)} · today ${inr(received)}`} tone="bad" />
+        <TotalTile label="Service given" value={servedTotal} note={formatMonth(month)} tone="good" />
+        <TotalTile label="Still to serve" value={held} note="Waiting" tone="ink" />
+      </section>
+      {role === "admin" ? (
+        <div className="mt-4">
+          <DaySelect value={shownDay} dates={servedDates} onChange={setServedDay} />
+        </div>
+      ) : null}
+      <div className="mt-4 grid items-start gap-4 lg:grid-cols-2">
+    <section className="rounded-xl border border-line border-l-4 border-l-bad bg-surface p-5">
       <h2 className="font-display text-2xl">Advance received</h2>
-      <p className="mt-3 text-base tabular-nums">
-        Received today {inr(received)} · Still to serve {inr(held)}
-      </p>
       <form
-        className="mt-3 grid gap-3"
+        className="mt-4 grid gap-3"
         onSubmit={(event) => {
           event.preventDefault();
           setPending(true);
@@ -393,6 +386,7 @@ function AdvanceBlock({ month }: { month: string }) {
         </label>
         <Button type="submit" disabled={pending}>{pending ? "Saving…" : "Save advance"}</Button>
       </form>
+      <h3 className="mt-6 font-medium">Still to serve</h3>
       {open.length === 0 ? <p className="mt-4 text-sm text-muted">No advance is waiting.</p> : null}
       {byMonth(open).map((group) => (
         <div key={group.month}>
@@ -408,7 +402,7 @@ function AdvanceBlock({ month }: { month: string }) {
                   {line.mobile ? ` · ${line.mobile}` : ""}
                 </span>
               </span>
-              <span className="tabular-nums">{inr(line.amount)}</span>
+              <span className="text-lg font-medium tabular-nums">{inr(line.amount)}</span>
             </div>
             <div className="mt-2 flex flex-wrap items-center gap-2">
               <label className="flex items-center gap-2 text-xs text-muted">
@@ -485,21 +479,19 @@ function AdvanceBlock({ month }: { month: string }) {
           </ul>
         </div>
       ))}
+      </section>
+      <section className="rounded-xl border border-line border-l-4 border-l-accent bg-surface p-5">
+        <h2 className="font-display text-2xl">Service given</h2>
       {role === "admin" ? (
         <>
-          <h3 className="mt-6 font-medium">Service given in {formatMonth(month)}</h3>
-          {paid.filter((line) => line.used.startsWith(month)).length === 0 ? <p className="mt-2 text-sm text-muted">No advance was served in this month.</p> : null}
-          {byDay(
-            paid
-              .filter((line) => line.used.startsWith(month))
-              .map((line) => ({ ...line, received: line.date, date: line.used })),
-          ).map((day) => (
-            <div key={day.date}>
-              <h3 className="mt-4 text-xs font-semibold tracking-widest text-faint">{formatDay(day.date)}</h3>
+          {servedRows.length === 0 ? <p className="mt-2 text-sm text-muted">No advance was served in this view.</p> : null}
+          {byDay(servedRows.map((line) => ({ ...line, received: line.date, date: line.used }))).map((group) => (
+            <div key={group.date}>
+              <h3 className="mt-4 text-xs font-semibold tracking-widest text-faint">{formatDay(group.date)}</h3>
               <ul className="divide-y divide-line">
-                {day.rows.map((line) => (
+                {group.rows.map((line) => (
               <li key={line.id} className="py-3 text-sm">
-                <div className="flex items-start justify-between gap-3">
+                <div className="grid grid-cols-[minmax(0,1fr)_6.5rem_auto] items-center gap-3">
                   <span>
                     <span className="font-medium">{line.customer}</span>
                     <span className="mt-0.5 block text-xs text-faint">
@@ -507,8 +499,7 @@ function AdvanceBlock({ month }: { month: string }) {
                       {line.mobile ? ` · ${line.mobile}` : ""}
                     </span>
                   </span>
-                  <span className="flex items-center gap-3">
-                    <span className="tabular-nums">{inr(line.amount)}</span>
+                  <span className="text-right text-lg font-medium tabular-nums">{inr(line.amount)}</span>
                     <Button
                       size="sm"
                       variant="secondary"
@@ -517,7 +508,6 @@ function AdvanceBlock({ month }: { month: string }) {
                     >
                       Edit
                     </Button>
-                  </span>
                 </div>
                 {edit?.id === line.id ? <AdvanceEdit edit={edit} pending={pending} onChange={setEdit} onCancel={() => setEdit(null)} onSave={() => saveAdvanceEdit(edit, setPending, setResult, setEdit, load)} /> : null}
               </li>
@@ -526,9 +516,13 @@ function AdvanceBlock({ month }: { month: string }) {
             </div>
           ))}
         </>
-      ) : null}
+      ) : (
+        <p className="mt-2 text-sm text-muted">Mark the amount done on the left. The balance stays in advance.</p>
+      )}
+      </section>
+      </div>
       <ResultDialog result={result} onClose={() => setResult(null)} />
-    </section>
+    </>
   );
 }
 
@@ -587,6 +581,77 @@ function AdvanceEdit({
         <Button type="button" size="sm" variant="ghost" disabled={pending} onClick={onCancel}>Cancel</Button>
       </div>
     </form>
+  );
+}
+
+function deleteMove(id: string, setResult: (value: Result | null) => void, load: () => void) {
+  void removeCustomerMove({ data: id })
+    .then(() => {
+      setResult({ ok: true, message: "Entry successfully deleted." });
+      load();
+    })
+    .catch((error: unknown) => setResult({ ok: false, message: error instanceof Error ? error.message : "Not deleted." }));
+}
+
+function TotalTile({ label, value, note, tone }: { label: string; value: number; note: string; tone: "bad" | "good" | "ink" }) {
+  return (
+    <div className={cn("rounded-xl border border-line p-4", tone === "bad" ? "bg-bad-soft" : tone === "good" ? "bg-accent-soft" : "bg-surface")}>
+      <p className="text-xs font-semibold tracking-widest text-faint">{label.toUpperCase()}</p>
+      <p className="mt-1 font-display text-3xl tabular-nums">{inr(value)}</p>
+      <p className="mt-1 text-sm text-muted">{note}</p>
+    </div>
+  );
+}
+
+function DaySelect({ value, dates, onChange }: { value: string; dates: string[]; onChange: (day: string) => void }) {
+  if (dates.length === 0) return null;
+  return (
+    <label className="flex items-center gap-2 text-sm">
+      <span className="text-muted">Date</span>
+      <select
+        aria-label="Date"
+        className="h-11 rounded-sm border border-line bg-surface px-3 text-base outline-none focus:border-accent"
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+      >
+        <option value="">All dates</option>
+        {dates.map((date) => (
+          <option key={date} value={date}>
+            {formatDay(date)}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
+function MoveList({ lines, empty, onDelete }: { lines: Line[]; empty: string; onDelete: (id: string) => void }) {
+  if (lines.length === 0) return <p className="mt-4 text-sm text-muted">{empty}</p>;
+  return (
+    <>
+      {byDay(lines).map((group) => (
+        <div key={group.date}>
+          <h3 className="mt-4 text-xs font-semibold tracking-widest text-faint">{formatDay(group.date)}</h3>
+          <ul className="divide-y divide-line">
+            {group.rows.map((line) => (
+              <li key={line.id} className="grid grid-cols-[minmax(0,1fr)_6.5rem_auto] items-center gap-3 py-3 text-sm">
+                <span>
+                  <span className="font-medium">{line.customer}</span>
+                  <span className="mt-0.5 block text-xs text-faint">
+                    {line.staff}
+                    {line.mobile ? ` · ${line.mobile}` : ""}
+                  </span>
+                </span>
+                <span className="text-right text-lg font-medium tabular-nums">{inr(line.amount)}</span>
+                <Button size="sm" variant="ghost" onClick={() => onDelete(line.id)}>
+                  Delete
+                </Button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ))}
+    </>
   );
 }
 

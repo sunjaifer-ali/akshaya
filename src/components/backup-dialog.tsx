@@ -113,6 +113,7 @@ function asBook(data: LedgerData): LedgerData {
     perfOverrides: data.perfOverrides,
     lyOverrides: data.lyOverrides ?? {},
     cashCloses: data.cashCloses ?? [],
+    salaryPaid: data.salaryPaid ?? [],
   };
 }
 
