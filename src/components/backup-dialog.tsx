@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
 import { ResultDialog, type Result } from "@/components/result-dialog";
-import { exportCentreArchive, importCentreArchive, listBackups, restoreBackup } from "@/lib/centre.functions";
+import { exportArchiveSlice, importArchivePart, listBackups, restoreBackup } from "@/lib/centre.functions";
 import { useLedger } from "@/lib/ledger/store";
 import type { LedgerData } from "@/lib/ledger/types";
 
@@ -28,17 +28,14 @@ export function BackupDialog({ open, onOpenChange }: { open: boolean; onOpenChan
       open={open}
       onOpenChange={onOpenChange}
       title="Backup"
-      description="A copy is kept each day the book changes. Download a file for the Google Drive folder."
+      description="Neon keeps the last 7 days. Download a file each month and keep it in Google Drive."
     >
       <div className="grid gap-2">
         <Button
           variant="secondary"
           onClick={() => {
-            void exportCentreArchive()
-              .then((file) => {
-                downloadJson(`${slug(book.centreName)}-book.json`, file);
-                setNotice("Book downloaded, including the counter, credit, advances, and payments.");
-              })
+            void downloadArchive(book.centreName)
+              .then(() => setNotice("Book downloaded, including the counter, credit, advances, and payments."))
               .catch((error: unknown) => setNotice(error instanceof Error ? error.message : "The book was not downloaded."));
           }}
         >
@@ -58,7 +55,7 @@ export function BackupDialog({ open, onOpenChange }: { open: boolean; onOpenChan
             if (!file) return;
             try {
               const parsed = JSON.parse(await file.text()) as unknown;
-              const saved = await importCentreArchive({ data: parsed });
+              const saved = await restoreArchive(parsed);
               book.replaceBook(asBook(saved.book));
               setNotice("Book restored. Counter, credit, advances, and payments are included.");
             } catch (error) {
@@ -69,7 +66,7 @@ export function BackupDialog({ open, onOpenChange }: { open: boolean; onOpenChan
       </div>
       <div className="mt-4 rounded-lg border border-line p-3">
         <p className="text-sm font-medium">Saved copies</p>
-        <p className="mt-1 text-xs text-muted">The last 90 days. Restore puts that day back into the book.</p>
+        <p className="mt-1 text-xs text-muted">The last 7 days. Restore puts that day's closing back. Your downloaded file is the long copy.</p>
         {backups.length === 0 ? <p className="mt-2 text-sm text-muted">No copy yet. It is saved the next time the book changes.</p> : null}
         <ul className="mt-2 divide-y divide-line">
           {backups.map((copy) => (
@@ -119,6 +116,52 @@ function asBook(data: LedgerData): LedgerData {
 
 function slug(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "centre";
+}
+
+async function downloadArchive(centreName: string): Promise<void> {
+  const file: { kind: string; version: number; book?: unknown; services: unknown[]; credits: unknown[]; advances: unknown[]; diary: unknown[] } = {
+    kind: "akshaya-thrikkadeeri-book",
+    version: 2,
+    services: [],
+    credits: [],
+    advances: [],
+    diary: [],
+  };
+  const head = await exportArchiveSlice({ data: { section: "book", offset: 0 } });
+  file.book = head.book;
+  for (const section of ["services", "credits", "advances", "diary"] as const) {
+    let offset = 0;
+    for (;;) {
+      const part = await exportArchiveSlice({ data: { section, offset } });
+      file[section].push(...part.rows);
+      if (part.done || part.rows.length === 0) break;
+      offset += part.rows.length;
+    }
+  }
+  downloadJson(`${slug(centreName)}-book.json`, file);
+}
+
+async function restoreArchive(parsed: unknown): Promise<{ book: LedgerData }> {
+  const file = parsed && typeof parsed === "object" ? (parsed as { book?: unknown; services?: unknown; credits?: unknown; advances?: unknown; diary?: unknown }) : {};
+  const book = file.book ?? parsed;
+  await sendPart("services", file.services);
+  await sendPart("credits", file.credits);
+  await sendPart("advances", file.advances);
+  await sendPart("diary", file.diary);
+  const saved = await importArchivePart({ data: { section: "book", book } });
+  if (!saved.book) throw new Error("Could not read that file.");
+  return { book: saved.book };
+}
+
+async function sendPart(section: "services" | "credits" | "advances" | "diary", rows: unknown): Promise<void> {
+  if (!Array.isArray(rows)) return;
+  if (rows.length === 0) {
+    await importArchivePart({ data: { section, first: true, rows: [] } });
+    return;
+  }
+  for (let index = 0; index < rows.length; index += 400) {
+    await importArchivePart({ data: { section, first: index === 0, rows: rows.slice(index, index + 400) } });
+  }
 }
 
 function downloadJson(filename: string, file: unknown): void {

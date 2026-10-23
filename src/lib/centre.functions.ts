@@ -2351,16 +2351,100 @@ async function keepDailyBackup(
 ) {
   await ensureBackupTable(sql);
   const day = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(new Date());
-  const records = await readArchiveRecords(sql);
-  const payload = { kind: "akshaya-thrikkadeeri-book", version: 2, book, ...records };
+  const payload = { kind: "akshaya-thrikkadeeri-book", version: 2, book };
   await sql.query(
     `insert into centre_backup (id, taken_on, data)
      values ($1, $1::date, $2::jsonb)
      on conflict (id) do update set data = excluded.data, created_at = now()`,
     [day, JSON.stringify(payload)],
   );
-  await sql.query(`delete from centre_backup where taken_on < ($1::date - interval '90 days')`, [day]);
+  await sql.query(`delete from centre_backup where taken_on < ($1::date - interval '7 days')`, [day]);
+  await trimStoredRows(sql);
 }
+
+async function trimStoredRows(sql: Awaited<ReturnType<typeof import("@/lib/db").getSql>>) {
+  await ensureLoginTable(sql);
+  await sql.query(`delete from login_log where at < now() - interval '180 days'`);
+  await sql.query(`delete from "session" where "expiresAt" < now() - interval '1 day'`).catch(() => undefined);
+  await sql.query(`delete from "verification" where "expiresAt" < now() - interval '1 day'`).catch(() => undefined);
+}
+
+const ARCHIVE_PAGE = 400;
+
+export const exportArchiveSlice = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((input: { section?: string; offset?: number }) => {
+    const section = String(input?.section ?? "");
+    if (!["book", "services", "credits", "advances", "diary"].includes(section)) throw new Error("That part of the book was not recognised.");
+    const offset = Math.max(0, Math.floor(Number(input?.offset) || 0));
+    return { section, offset };
+  })
+  .handler(async ({ context, data }) => {
+    await requireAdmin(context.userId);
+    const { getSql } = await import("@/lib/db");
+    const sql = await getSql();
+    if (data.section === "book") {
+      const rows = await sql<{ data: LedgerData | string }>`select data from centre_book where id = 'centre'`;
+      const stored = rows[0] ? asJson(rows[0].data) : null;
+      if (!stored?.centreName) throw new Error("The centre book is not there.");
+      const fromTable = (await readPayouts(sql, context.userId)).map(({ mine: _mine, ...item }) => item);
+      return {
+        book: { ...stored, payouts: fromTable.length > 0 ? fromTable : (stored.payouts ?? []) },
+        rows: [] as Array<Record<string, string | number | boolean | null>>,
+        done: true,
+      };
+    }
+    const records = await readArchiveRecords(sql);
+    const all = data.section === "services" ? records.services : data.section === "credits" ? records.credits : data.section === "advances" ? records.advances : records.diary;
+    const rows = all.slice(data.offset, data.offset + ARCHIVE_PAGE);
+    return {
+      book: null,
+      rows: JSON.parse(JSON.stringify(rows)) as Array<Record<string, string | number | boolean | null>>,
+      done: data.offset + rows.length >= all.length,
+    };
+  });
+
+export const importArchivePart = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((input: { section?: string; first?: boolean; rows?: unknown[]; book?: unknown }) => {
+    const section = String(input?.section ?? "");
+    if (!["services", "credits", "advances", "diary", "book"].includes(section)) throw new Error("That part of the file was not recognised.");
+    return {
+      section,
+      first: Boolean(input?.first),
+      rows: Array.isArray(input?.rows) ? input.rows.slice(0, ARCHIVE_PAGE) : [],
+      book: input?.book,
+    };
+  })
+  .handler(async ({ context, data }) => {
+    await requireAdmin(context.userId);
+    const { getSql } = await import("@/lib/db");
+    const sql = await getSql();
+    await ensureServiceTable(sql);
+    await ensureCustomerTable(sql);
+    await ensureAdvanceTable(sql);
+    await ensurePayoutTable(sql);
+    await ensureDiaryTable(sql);
+    if (data.section === "services") await replaceServices(sql, data.rows, context.userId, data.first);
+    if (data.section === "credits") await replaceCredits(sql, data.rows, context.userId, data.first);
+    if (data.section === "advances") await replaceAdvances(sql, data.rows, context.userId, data.first);
+    if (data.section === "diary") await replaceDiary(sql, data.rows, context.userId, data.first);
+    if (data.section !== "book") return { ok: true, book: null };
+    const book = archiveBook(data.book);
+    if (!book) throw new Error("That file is not a centre book.");
+    const saved = await withTransaction(async (sql) => {
+      if (Array.isArray(book.payouts)) await replacePayouts(sql, book.payouts, context.userId);
+      const synced = await resyncCounterSplits(sql, book);
+      const now = new Date().toISOString();
+      const touches: Record<string, string> = {};
+      for (const close of synced.book.cashCloses ?? []) touches[close.date] = now;
+      for (const day of synced.book.days ?? []) touches[`day:${day.date}`] = now;
+      const payouts = synced.book.payouts ?? [];
+      await writeBook(sql, synced.book, touches);
+      return { ...synced.book, payouts };
+    });
+    return { ok: true, book: saved };
+  });
 
 type SqlClient = Awaited<ReturnType<typeof import("@/lib/db").getSql>>;
 
@@ -2508,8 +2592,8 @@ async function readArchiveRecords(sql: SqlClient) {
   };
 }
 
-async function replaceServices(sql: SqlClient, rows: unknown[], fallbackUser: string) {
-  await sql`delete from service_entry`;
+async function replaceServices(sql: SqlClient, rows: unknown[], fallbackUser: string, wipe = true) {
+  if (wipe) await sql`delete from service_entry`;
   for (const item of rows.slice(0, 20000)) {
     const row = item as Record<string, unknown>;
     const id = clip(row.id, 80);
@@ -2522,8 +2606,8 @@ async function replaceServices(sql: SqlClient, rows: unknown[], fallbackUser: st
   }
 }
 
-async function replaceCredits(sql: SqlClient, rows: unknown[], fallbackUser: string) {
-  await sql`delete from customer_move`;
+async function replaceCredits(sql: SqlClient, rows: unknown[], fallbackUser: string, wipe = true) {
+  if (wipe) await sql`delete from customer_move`;
   for (const item of rows.slice(0, 20000)) {
     const row = item as Record<string, unknown>;
     const id = clip(row.id, 80);
@@ -2537,8 +2621,8 @@ async function replaceCredits(sql: SqlClient, rows: unknown[], fallbackUser: str
   }
 }
 
-async function replaceAdvances(sql: SqlClient, rows: unknown[], fallbackUser: string) {
-  await sql`delete from customer_advance`;
+async function replaceAdvances(sql: SqlClient, rows: unknown[], fallbackUser: string, wipe = true) {
+  if (wipe) await sql`delete from customer_advance`;
   for (const item of rows.slice(0, 20000)) {
     const row = item as Record<string, unknown>;
     const id = clip(row.id, 80);
@@ -2564,8 +2648,8 @@ async function replacePayouts(sql: SqlClient, rows: CentrePayout[], fallbackUser
   }
 }
 
-async function replaceDiary(sql: SqlClient, rows: unknown[], fallbackUser: string) {
-  await sql`delete from centre_diary`;
+async function replaceDiary(sql: SqlClient, rows: unknown[], fallbackUser: string, wipe = true) {
+  if (wipe) await sql`delete from centre_diary`;
   for (const item of rows.slice(0, 20000)) {
     const row = item as Record<string, unknown>;
     const id = clip(row.id, 80);
