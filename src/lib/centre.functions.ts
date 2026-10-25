@@ -1939,7 +1939,7 @@ async function rollCounterDay(sql: Awaited<ReturnType<typeof import("@/lib/db").
   `;
   const row = readRow(current[0]);
   if (!row) return;
-  const synced = await resyncCounterSplits(sql, row.data);
+  const synced = await resyncCounterSplits(sql, row.data, date);
   const touches = { ...row.touches, [`day:${date}`]: new Date().toISOString() };
   await writeBook(sql, synced.book, touches);
 }
@@ -1951,36 +1951,66 @@ function normStaffName(value: string) {
 async function resyncCounterSplits(
   sql: Awaited<ReturnType<typeof import("@/lib/db").getSql>>,
   book: LedgerData,
+  onlyDate?: string,
 ): Promise<{ book: LedgerData; dates: string[] }> {
   await ensureServiceTable(sql);
-  const rows = await sql<{ taken_on: string; staff_name: string; amount: number }>`
-    select taken_on::text as taken_on, staff_name, coalesce(sum(amount), 0)::int as amount
-    from service_entry group by taken_on, staff_name
-  `;
-  const gpayRows = await sql<{ taken_on: string; amount: number; department: number }>`
-    select taken_on::text as taken_on, coalesce(sum(amount), 0)::int as amount, coalesce(sum(department), 0)::int as department
-    from service_entry where personal_gpay group by taken_on
-  `;
+  const rows = onlyDate
+    ? await sql<{ taken_on: string; staff_name: string; amount: number }>`
+        select taken_on::text as taken_on, staff_name, coalesce(sum(amount), 0)::int as amount
+        from service_entry where taken_on = ${onlyDate} group by taken_on, staff_name
+      `
+    : await sql<{ taken_on: string; staff_name: string; amount: number }>`
+        select taken_on::text as taken_on, staff_name, coalesce(sum(amount), 0)::int as amount
+        from service_entry group by taken_on, staff_name
+      `;
+  const gpayRows = onlyDate
+    ? await sql<{ taken_on: string; amount: number; department: number }>`
+        select taken_on::text as taken_on, coalesce(sum(amount), 0)::int as amount, coalesce(sum(department), 0)::int as department
+        from service_entry where personal_gpay and taken_on = ${onlyDate} group by taken_on
+      `
+    : await sql<{ taken_on: string; amount: number; department: number }>`
+        select taken_on::text as taken_on, coalesce(sum(amount), 0)::int as amount, coalesce(sum(department), 0)::int as department
+        from service_entry where personal_gpay group by taken_on
+      `;
   const gpayByDate = new Map(gpayRows.map((entry) => [String(entry.taken_on).slice(0, 10), Number(entry.amount) || 0]));
-  const bankRows = await sql<{ taken_on: string; amount: number }>`
-    select taken_on::text as taken_on, coalesce(sum(bank_department), 0)::int as amount
-    from service_entry group by taken_on
-  `;
+  const bankRows = onlyDate
+    ? await sql<{ taken_on: string; amount: number }>`
+        select taken_on::text as taken_on, coalesce(sum(bank_department), 0)::int as amount
+        from service_entry where taken_on = ${onlyDate} group by taken_on
+      `
+    : await sql<{ taken_on: string; amount: number }>`
+        select taken_on::text as taken_on, coalesce(sum(bank_department), 0)::int as amount
+        from service_entry group by taken_on
+      `;
   const bankByDate = new Map(bankRows.map((entry) => [String(entry.taken_on).slice(0, 10), Number(entry.amount) || 0]));
-  if (rows.length === 0) return { book, dates: [] };
+  if (!onlyDate && rows.length === 0) return { book, dates: [] };
   await ensureCustomerTable(sql);
-  const creditRows = await sql<{ taken_on: string; amount: number }>`
-    select s.taken_on::text as taken_on, coalesce(sum(s.amount), 0)::int as amount
-    from service_entry s
-    where not s.personal_gpay
-      and exists (
-        select 1 from customer_move m
-        where m.kind = 'credit'
-          and m.taken_on = s.taken_on
-          and lower(trim(m.customer)) = lower(trim(s.customer))
-      )
-    group by s.taken_on
-  `;
+  const creditRows = onlyDate
+    ? await sql<{ taken_on: string; amount: number }>`
+        select s.taken_on::text as taken_on, coalesce(sum(s.amount), 0)::int as amount
+        from service_entry s
+        where s.taken_on = ${onlyDate}
+          and not s.personal_gpay
+          and exists (
+            select 1 from customer_move m
+            where m.kind = 'credit'
+              and m.taken_on = s.taken_on
+              and lower(trim(m.customer)) = lower(trim(s.customer))
+          )
+        group by s.taken_on
+      `
+    : await sql<{ taken_on: string; amount: number }>`
+        select s.taken_on::text as taken_on, coalesce(sum(s.amount), 0)::int as amount
+        from service_entry s
+        where not s.personal_gpay
+          and exists (
+            select 1 from customer_move m
+            where m.kind = 'credit'
+              and m.taken_on = s.taken_on
+              and lower(trim(m.customer)) = lower(trim(s.customer))
+          )
+        group by s.taken_on
+      `;
   const creditByDate = new Map(creditRows.map((entry) => [String(entry.taken_on).slice(0, 10), Number(entry.amount) || 0]));
   const departmentByDate = new Map(gpayRows.map((entry) => [String(entry.taken_on).slice(0, 10), Number(entry.department) || 0]));
   const byDate = new Map<string, { amount: number; splits: Record<string, number>; personalGpay: number; departmentGpay: number; bankDepartment: number }>();
@@ -1992,6 +2022,33 @@ async function resyncCounterSplits(
     const employee = (book.employees ?? []).find((person) => normStaffName(person.name) === normStaffName(entry.staff_name));
     if (employee && value > 0) bucket.splits[employee.id] = (bucket.splits[employee.id] ?? 0) + value;
     byDate.set(date, bucket);
+  }
+  if (onlyDate) {
+    const fresh = byDate.get(onlyDate);
+    const creditService = creditByDate.get(onlyDate) ?? 0;
+    const previous = (book.days ?? []).filter((day) => day.date === onlyDate);
+    const days = (book.days ?? []).filter((day) => day.date !== onlyDate);
+    if (fresh && fresh.amount > 0) {
+      days.push({
+        date: onlyDate,
+        amount: fresh.amount,
+        note: "Entered on the counter",
+        splits: fresh.splits,
+        personalGpay: fresh.personalGpay,
+        departmentGpay: fresh.departmentGpay,
+        bankDepartment: fresh.bankDepartment,
+        creditService,
+      });
+    } else {
+      for (const day of previous) {
+        if (day.note.startsWith("Entered on the counter")) continue;
+        days.push({ ...day, personalGpay: fresh?.personalGpay ?? day.personalGpay, departmentGpay: fresh?.departmentGpay ?? day.departmentGpay, bankDepartment: fresh?.bankDepartment ?? day.bankDepartment, creditService });
+      }
+    }
+    days.sort((a, b) => (a.date < b.date ? -1 : 1));
+    let next: LedgerData = { ...book, days };
+    if (onlyDate < indiaToday()) next = applyImportedLeave(next, onlyDate);
+    return { book: next, dates: [onlyDate] };
   }
   const seen = new Set<string>();
   let days = (book.days ?? []).flatMap((day) => {

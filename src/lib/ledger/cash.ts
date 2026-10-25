@@ -224,7 +224,10 @@ export function checkClose(
   const empty = { last: null as number | null, lastDate: "", movement: null as number | null, collected: null as number | null, personalGpay: 0, departmentGpay: 0, bankDepartment: 0, paidOut: 0, receipts: 0, payments: 0, serviceEarned: 0, income: 0, cashBook: idle, centreBook: idle, personalBook: idle, walletBook: idle, ...gap, advanceChange: 0, advanceServed: 0, advanceIn: 0, missing: [] as string[], difference: null as number | null, unfixed: null as number | null };
   if (!last) return empty;
   const span = spanDates(last.date, row.date);
-  const counterDay = (date: string) => days.find((item) => item.date === date && item.note.startsWith("Entered on the counter"));
+  const counterDay = (date: string) => {
+    const day = dayOn(days, date);
+    return day && day.note.startsWith("Entered on the counter") ? day : undefined;
+  };
   const paidOut = payouts.reduce((sum, item) => (span.includes(item.date) ? sum + (item.amount || 0) : sum), 0);
   const missing = span.filter((date) => !isSunday(date) && !holidays.includes(date) && !counterDay(date));
   const known = span.reduce((sum, date) => sum + (counterDay(date)?.amount ?? 0), 0);

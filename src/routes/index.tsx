@@ -204,7 +204,7 @@ function DeskPage() {
       </section>
 
       <section className="mt-4 grid gap-4 lg:grid-cols-5">
-        <div className="rounded-xl border border-line bg-surface p-5 lg:col-span-3">
+        <div className="flex flex-col rounded-xl border border-line bg-surface p-5 lg:col-span-3">
           <h2 className="font-display text-2xl">This year, month by month</h2>
           <div className="print-chart mt-3 h-52">
             {mounted ? (
@@ -221,6 +221,20 @@ function DeskPage() {
                 </BarChart>
               </ResponsiveContainer>
             ) : null}
+          </div>
+          <div className="mt-4 grid flex-1 content-end gap-3 sm:grid-cols-2">
+            <Link to="/closing" search={{ d: today || `${month}-01` }} className="rounded-lg border border-line bg-bg p-4 hover:border-line-strong">
+              <CardText title="Closing" value={mounted ? closeWord.value : "—"} note="Cash, wallets and bank" />
+            </Link>
+            <Link to="/expenses" search={{ m: month }} className="rounded-lg border border-line bg-bg p-4 hover:border-line-strong">
+              <CardText title="Expenses" value={snap.expense > 0 ? inr(snap.expense) : "—"} note="Bills for this month" />
+            </Link>
+            <Link to="/centre" className="rounded-lg border border-line bg-bg p-4 hover:border-line-strong">
+              <CardText title="Centre month" value={snap.collection > 0 ? inr(snap.collection) : "—"} note="Collection and margin" />
+            </Link>
+            <Link to="/reports" className="rounded-lg border border-line bg-bg p-4 hover:border-line-strong">
+              <CardText title="Reports" value={inr(snap.margin)} note="Each month and each person" />
+            </Link>
           </div>
         </div>
         <div className="rounded-xl border border-line bg-surface p-5 lg:col-span-2">
@@ -244,21 +258,6 @@ function DeskPage() {
             Work out salary
           </Link>
         </div>
-      </section>
-
-      <section className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <Link to="/closing" search={{ d: today || `${month}-01` }} className="rounded-xl border border-line bg-surface p-5 hover:border-line-strong">
-          <CardText title="Closing" value={mounted ? closeWord.value : "—"} note="Cash, wallets and bank" />
-        </Link>
-        <Link to="/expenses" search={{ m: month }} className="rounded-xl border border-line bg-surface p-5 hover:border-line-strong">
-          <CardText title="Expenses" value={snap.expense > 0 ? inr(snap.expense) : "—"} note="Bills for this month" />
-        </Link>
-        <Link to="/centre" className="rounded-xl border border-line bg-surface p-5 hover:border-line-strong">
-          <CardText title="Centre month" value={snap.collection > 0 ? inr(snap.collection) : "—"} note="Collection and margin" />
-        </Link>
-        <Link to="/reports" className="rounded-xl border border-line bg-surface p-5 hover:border-line-strong">
-          <CardText title="Reports" value={inr(snap.margin)} note="Each month and each person" />
-        </Link>
       </section>
     </div>
   );
