@@ -8,7 +8,7 @@ import { ResultDialog, type Result } from "@/components/result-dialog";
 import { Button } from "@/components/ui/button";
 import { chartColors } from "@/lib/chart-colors";
 import { inr, pct } from "@/lib/format";
-import { centreSnapshot, monthCollection, recordedAttendance, staffMonthRows } from "@/lib/ledger/calc";
+import { centreSnapshot, dayOn, monthCollection, recordedAttendance, staffMonthRows } from "@/lib/ledger/calc";
 import { formatMonthShort, fyLabel, fyMonths, fyStartYear, isSunday } from "@/lib/ledger/dates";
 import { useLedger } from "@/lib/ledger/store";
 import { LEAVE_LABEL, type Employee } from "@/lib/ledger/types";
@@ -220,7 +220,7 @@ function StaffPage() {
                 </div>
               </div>
               <div className="mt-4 grid gap-3 sm:grid-cols-4">
-                <Mini label="That day" value={inr(book.days.find((item) => item.date === (day || today))?.splits[selected.employee.id] ?? 0)} />
+                <Mini label="That day" value={inr(dayOn(book.days, day || today)?.splits[selected.employee.id] ?? 0)} />
                 <Mini label="Year collection" value={inr(ytdCollection)} />
                 <Mini label="Year salary" value={inr(ytdPay)} />
                 <Mini label="Pay % of their work" value={ytdCollection > 0 ? pct((ytdPay / ytdCollection) * 100) : "—"} />

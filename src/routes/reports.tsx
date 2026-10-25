@@ -5,7 +5,7 @@ import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/cn";
 import { inr, pct, signedInr } from "@/lib/format";
-import { centreSnapshot, recordedAttendance, staffMonthRows, payoutTotal, type CentreSnapshot, type MonthAttendance, type StaffMonthRow } from "@/lib/ledger/calc";
+import { centreSnapshot, employeeSplitSum, recordedAttendance, staffMonthRows, payoutTotal, type CentreSnapshot, type MonthAttendance, type StaffMonthRow } from "@/lib/ledger/calc";
 import { addDays, formatDay, formatMonthShort, fyLabel, fyMonths, fyStartYear } from "@/lib/ledger/dates";
 import { loginLog } from "@/lib/centre.functions";
 import { downloadWorkbook, type Sheet } from "@/lib/excel";
@@ -732,7 +732,7 @@ function staffInYear(people: { rows: StaffMonthRow[] }[]): Employee[] {
 
 function involved(id: string, month: string, book: LedgerData): boolean {
   if (book.leaves.some((mark) => mark.employeeId === id && mark.date.startsWith(month))) return true;
-  if (book.days.some((day) => day.date.startsWith(month) && (day.splits[id] ?? 0) > 0)) return true;
+  if (employeeSplitSum(book.days, id, month) > 0) return true;
   return (book.perfOverrides ?? []).some((item) => item.employeeId === id && item.month === month && item.amount > 0);
 }
 

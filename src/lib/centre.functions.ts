@@ -2024,6 +2024,9 @@ async function resyncCounterSplits(
     if (seen.has(date) || fresh.amount <= 0) continue;
     days.push({ date, amount: fresh.amount, note: "Entered on the counter", splits: fresh.splits, personalGpay: fresh.personalGpay, departmentGpay: fresh.departmentGpay, bankDepartment: fresh.bankDepartment, creditService: creditByDate.get(date) ?? 0 });
   }
+  const uniqueDays = new Map<string, CollectionDay>();
+  for (const day of days) uniqueDays.set(day.date, day);
+  days = [...uniqueDays.values()];
   days.sort((a, b) => (a.date < b.date ? -1 : 1));
   let next: LedgerData = { ...book, days };
   const today = indiaToday();

@@ -1,11 +1,13 @@
 import { useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
+import { MonthBar } from "@/components/month-bar";
 import { MoneyField } from "@/components/money-field";
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
+import { downloadWorkbook } from "@/lib/excel";
 import { inr } from "@/lib/format";
-import { employeeSplitSum, monthCollection, monthDays } from "@/lib/ledger/calc";
-import { formatDay, formatMonth, fyMonths, fyStartYear } from "@/lib/ledger/dates";
+import { dayOn, employeeSplitSum, monthCollection, monthDays } from "@/lib/ledger/calc";
+import { datesInMonth, formatDay, formatMonth, fyMonths, fyStartYear } from "@/lib/ledger/dates";
 import { useLedger } from "@/lib/ledger/store";
 import { readMonth } from "@/lib/search";
 import { useResolvedMonth, useTodayKey } from "@/lib/use-today";
@@ -22,13 +24,14 @@ function CollectionsPage() {
   const book = useLedger();
   const [from, setFrom] = useState(today || `${monthFromUrl}-01`);
   const [to, setTo] = useState(today || `${monthFromUrl}-01`);
+  const [reportMonth, setReportMonth] = useState((today || monthFromUrl).slice(0, 7));
   const [person, setPerson] = useState("");
   const [pendingDelete, setPendingDelete] = useState(false);
   const start = from <= to ? from : to;
   const end = from <= to ? to : from;
   const month = end.slice(0, 7);
   const yearMonths = fyMonths(fyStartYear(month));
-  const selected = book.days.find((item) => item.date === end);
+  const selected = dayOn(book.days, end);
   const people = book.employees.filter((employee) => employee.active || book.days.some((item) => (item.splits[employee.id] ?? 0) > 0));
   const rows = people
     .map((employee) => ({
@@ -56,6 +59,7 @@ function CollectionsPage() {
       <PageHeader
         kicker="COLLECTIONS"
         title="Staff collection"
+        className="no-print"
         actions={
           <div className="flex flex-wrap items-center gap-2">
             <select
@@ -101,14 +105,14 @@ function CollectionsPage() {
         }
       />
 
-        <section className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <section className="no-print mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <Mini label={`${formatDay(start)} – ${formatDay(end)}`} value={inr(one ? one.period : totals.period)} />
           <Mini label={formatDay(end)} value={inr(one ? one.day : totals.day)} />
           <Mini label={formatMonth(month)} value={inr(one ? one.month : totals.month)} />
           <Mini label={`${fyStartYear(month)}–${String(fyStartYear(month) + 1).slice(2)}`} value={inr(one ? one.year : totals.year)} />
         </section>
 
-      <section className="mt-4 rounded-xl border border-line bg-surface p-5">
+      <section className="no-print mt-4 rounded-xl border border-line bg-surface p-5">
         <h2 className="font-display text-2xl">{one ? one.name : "All staff"}</h2>
         <p className="mt-1 text-sm text-muted">{formatDay(start)} – {formatDay(end)}</p>
         {shown.length === 0 ? <p className="mt-4 text-sm text-muted">No staff yet.</p> : null}
@@ -185,12 +189,124 @@ function CollectionsPage() {
           </div>
         ) : null}
       </section>
+
+      <DailySheet centre={book.centreName} month={reportMonth} onMonth={setReportMonth} people={people} days={book.days} />
     </div>
   );
 }
 
-function rangeSplit(days: { date: string; splits: Record<string, number> }[], employeeId: string, start: string, end: string): number {
-  return days.reduce((sum, day) => (day.date < start || day.date > end ? sum : sum + (day.splits[employeeId] ?? 0)), 0);
+function DailySheet({
+  centre,
+  month,
+  onMonth,
+  people,
+  days,
+}: {
+  centre: string;
+  month: string;
+  onMonth: (month: string) => void;
+  people: { id: string; name: string }[];
+  days: { date: string; amount: number; note?: string; splits: Record<string, number> }[];
+}) {
+  const staff = people.slice().sort((a, b) => a.name.localeCompare(b.name));
+  const rows = datesInMonth(month)
+    .map((date) => {
+      const saved = days.find((item) => item.date === date && !/centre sheet|month total/i.test(item.note ?? ""));
+      const amounts = staff.map((person) => saved?.splits[person.id] ?? 0);
+      const total = amounts.reduce((sum, amount) => sum + amount, 0);
+      return { date, amounts, total };
+    })
+    .filter((row) => row.total > 0);
+  const columnTotals = staff.map((_, index) => rows.reduce((sum, row) => sum + row.amounts[index], 0));
+  const grand = rows.reduce((sum, row) => sum + row.total, 0);
+
+  return (
+    <section className="mt-4 rounded-xl border border-line bg-surface p-5">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <p className="text-xs font-semibold tracking-widest text-faint">DAILY SERVICE CHARGE</p>
+          <h2 className="font-display text-3xl">{formatMonth(month)}</h2>
+          <p className="mt-1 text-sm text-muted">{centre}</p>
+        </div>
+        <div className="no-print flex flex-wrap items-center gap-2">
+          <MonthBar month={month} onChange={onMonth} />
+          <Button
+            variant="secondary"
+            onClick={() => {
+              void downloadWorkbook(`Staff-daily-${month}.xlsx`, [
+                {
+                  name: "Daily",
+                  rows: [
+                    ["Date", ...staff.map((person) => person.name), "All staff"],
+                    ...rows.map((row) => [formatDay(row.date), ...row.amounts, row.total]),
+                    ["Total", ...columnTotals, grand],
+                  ],
+                },
+              ]);
+            }}
+          >
+            Excel
+          </Button>
+          <Button onClick={() => window.print()}>PDF</Button>
+        </div>
+      </div>
+      {rows.length === 0 ? <p className="mt-4 text-sm text-muted">No collection in this month.</p> : null}
+      {rows.length > 0 ? (
+        <div className="mt-4 overflow-x-auto">
+          <table className="w-full border-collapse text-sm">
+            <thead>
+              <tr className="border-b border-line text-left text-xs font-semibold tracking-widest text-faint">
+                <th className="sticky left-0 bg-surface py-2 pr-3 text-left font-semibold">Date</th>
+                {staff.map((person) => (
+                  <th key={person.id} className="px-2 py-2 text-right font-semibold">{person.name}</th>
+                ))}
+                <th className="py-2 pl-3 text-right font-semibold">All staff</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row) => (
+                <tr key={row.date} className="border-b border-line">
+                  <td className="sticky left-0 bg-surface py-2 pr-3 font-medium whitespace-nowrap">{formatDay(row.date)}</td>
+                  {row.amounts.map((amount, index) => (
+                    <td key={staff[index]?.id ?? index} className="px-2 py-2 text-right tabular-nums">{amount ? inr(amount) : "—"}</td>
+                  ))}
+                  <td className="py-2 pl-3 text-right text-base font-medium tabular-nums">{inr(row.total)}</td>
+                </tr>
+              ))}
+              <tr>
+                <td className="sticky left-0 bg-surface py-3 font-medium">Total</td>
+                {columnTotals.map((amount, index) => (
+                  <td key={staff[index]?.id ?? index} className="px-2 py-3 text-right font-medium tabular-nums">{inr(amount)}</td>
+                ))}
+                <td className="py-3 pl-3 text-right font-display text-2xl tabular-nums">{inr(grand)}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+function rangeSplit(days: { date: string; note?: string; splits: Record<string, number> }[], employeeId: string, start: string, end: string): number {
+  const months = new Set<string>();
+  for (const day of days) {
+    if (day.date >= start && day.date <= end) months.add(day.date.slice(0, 7));
+  }
+  const skipSheet = new Set<string>();
+  for (const month of months) {
+    const hasDaily = days.some(
+      (day) => day.date.startsWith(month) && !/centre sheet|month total/i.test(day.note ?? "") && Object.values(day.splits).some((amount) => amount > 0),
+    );
+    if (hasDaily) skipSheet.add(month);
+  }
+  const seen = new Set<string>();
+  return days.reduce((sum, day) => {
+    if (day.date < start || day.date > end || seen.has(day.date)) return sum;
+    if (skipSheet.has(day.date.slice(0, 7)) && /centre sheet|month total/i.test(day.note ?? "")) return sum;
+    seen.add(day.date);
+    return sum + (day.splits[employeeId] ?? 0);
+  }, 0);
 }
 
 function Mini({ label, value }: { label: string; value: string }) {

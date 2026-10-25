@@ -7,7 +7,7 @@ import { cn } from "@/lib/cn";
 import { inr, signedInr } from "@/lib/format";
 import { diaryDesk, advanceDesk, customerCreditDesk, type OpenCredit } from "@/lib/centre.functions";
 import { accountLines, aewsCollection, checkClose, unpaidCreditReport } from "@/lib/ledger/cash";
-import { centreSnapshot, monthCollection, staffMonthRows } from "@/lib/ledger/calc";
+import { centreSnapshot, dayOn, monthCollection, staffMonthRows } from "@/lib/ledger/calc";
 import { addDays, formatDay, formatFull, formatMonthShort, fyMonths, fyStartYear, isSunday } from "@/lib/ledger/dates";
 import { useLedger } from "@/lib/ledger/store";
 import type { CashClose, CollectionDay, Employee, LeaveMark } from "@/lib/ledger/types";
@@ -393,8 +393,8 @@ function morningReview(
     }
     return "";
   })();
-  const worked = lastWorking ? book.days.find((day) => day.date === lastWorking && day.amount > 0 && /entered on the counter/i.test(day.note)) : undefined;
-  if (worked) {
+  const worked = lastWorking ? dayOn(book.days, lastWorking) : null;
+  if (worked && worked.amount > 0 && /entered on the counter/i.test(worked.note)) {
     const planned = new Set(book.leaves.filter((mark) => mark.date === worked.date && mark.code !== "HD").map((mark) => mark.employeeId));
     const absent = book.employees.filter((employee) => employee.active && (worked.splits[employee.id] ?? 0) <= 0 && !planned.has(employee.id));
     if (absent.length > 0) {

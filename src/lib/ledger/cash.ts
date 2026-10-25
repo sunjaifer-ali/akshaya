@@ -1,4 +1,5 @@
 import { addDays, isSunday } from "@/lib/ledger/dates";
+import { dayOn } from "@/lib/ledger/calc";
 import type { CashClose, CollectionDay, NoteCounts } from "@/lib/ledger/types";
 
 export const NOTE_ROWS = [
@@ -129,8 +130,8 @@ export function previousClose(rows: CashClose[], date: string): CashClose | null
 }
 
 export function aewsCollection(days: CollectionDay[], date: string): number | null {
-  const day = days.find((item) => item.date === date);
-  if (!day) return null;
+  const day = dayOn(days, date);
+  if (!day || day.amount <= 0) return null;
   if (/centre sheet|month total/i.test(day.note)) return null;
   return day.amount;
 }

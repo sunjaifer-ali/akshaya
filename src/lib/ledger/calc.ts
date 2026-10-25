@@ -17,11 +17,28 @@ export function monthCollection(days: CollectionDay[], month: string): number {
   return collectionRows(days, month).reduce((sum, day) => sum + day.amount, 0);
 }
 
-/** Daily counter rows win. A month-total sheet is used only when that month has no daily rows. */
+/** Daily counter rows win. A month-total sheet is used only when that month has no daily rows. One row per date. */
 function collectionRows(days: CollectionDay[], month: string): CollectionDay[] {
   const rows = monthDays(days, month);
   const daily = rows.filter((day) => !/centre sheet|month total/i.test(day.note));
-  return daily.some((day) => day.amount > 0) ? daily : rows;
+  const chosen = daily.some((day) => day.amount > 0) ? daily : rows;
+  const byDate = new Map<string, CollectionDay>();
+  for (const day of chosen) {
+    const prev = byDate.get(day.date);
+    if (!prev || rankDay(day) >= rankDay(prev)) byDate.set(day.date, day);
+  }
+  return [...byDate.values()];
+}
+
+function rankDay(day: CollectionDay): number {
+  if (/entered on the counter/i.test(day.note)) return 2;
+  if (/imported from aewskerala/i.test(day.note)) return 1;
+  return 0;
+}
+
+/** The one row that counts for a date. A month sheet is ignored once daily rows exist. */
+export function dayOn(days: CollectionDay[], date: string): CollectionDay | null {
+  return collectionRows(days, date.slice(0, 7)).find((day) => day.date === date) ?? null;
 }
 
 function isLump(rows: CollectionDay[]): boolean {
@@ -29,11 +46,18 @@ function isLump(rows: CollectionDay[]): boolean {
 }
 
 export function daysEntered(days: CollectionDay[], month: string): number {
-  return monthDays(days, month).filter((day) => day.amount > 0).length;
+  return collectionRows(days, month).filter((day) => day.amount > 0).length;
 }
 
 export function splitSum(splits: Record<string, number>): number {
   return Object.values(splits).reduce((sum, amount) => sum + amount, 0);
+}
+
+/** One row per date. A centre-sheet lump is used only when that month has no daily rows. */
+function staffDays(days: CollectionDay[], month: string): CollectionDay[] {
+  const byDate = new Map<string, CollectionDay>();
+  for (const day of collectionRows(days, month)) byDate.set(day.date, day);
+  return [...byDate.values()];
 }
 
 export function employeeSplitSum(
@@ -41,7 +65,7 @@ export function employeeSplitSum(
   employeeId: string,
   month: string,
 ): number {
-  return monthDays(days, month).reduce((sum, day) => sum + (day.splits[employeeId] ?? 0), 0);
+  return staffDays(days, month).reduce((sum, day) => sum + (day.splits[employeeId] ?? 0), 0);
 }
 
 export function performanceOf(
@@ -50,9 +74,14 @@ export function performanceOf(
   employeeId: string,
   month: string,
 ): { amount: number; source: "book" | "entered" } {
+  const fromBook = employeeSplitSum(days, employeeId, month);
+  const countedOnCounter = staffDays(days, month).some(
+    (day) => !/centre sheet|month total/i.test(day.note) && (day.splits[employeeId] ?? 0) > 0,
+  );
+  if (countedOnCounter) return { amount: fromBook, source: "book" };
   const hit = overrides.find((item) => item.employeeId === employeeId && item.month === month);
   if (hit) return { amount: hit.amount, source: "entered" };
-  return { amount: employeeSplitSum(days, employeeId, month), source: "book" };
+  return { amount: fromBook, source: "book" };
 }
 
 export function workingDaysInMonth(month: string, holidays: string[]): number {
@@ -100,7 +129,7 @@ export function recordedAttendance(
 ): MonthAttendance {
   const closed = new Set(holidays);
   const recorded = new Set(
-    monthDays(days, month)
+    collectionRows(days, month)
       .map((day) => day.date)
       .filter((date) => !isSunday(date) && !closed.has(date)),
   );
