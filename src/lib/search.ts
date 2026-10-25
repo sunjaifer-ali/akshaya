@@ -25,7 +25,7 @@ export function readYear(search: Record<string, unknown>): { fy?: string } {
   return {};
 }
 
-const REPORTS = ["centre", "staff", "expenses", "leave", "logins"] as const;
+const REPORTS = ["centre", "staff", "expenses", "leave", "transfers", "logins"] as const;
 export type ReportKind = (typeof REPORTS)[number];
 
 export function readReport(search: Record<string, unknown>): { fy?: string; r?: ReportKind; d?: string } {

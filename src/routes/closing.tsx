@@ -12,13 +12,11 @@ import {
   cashInHand,
   checkClose,
   countStarted,
-  creditGivenInMonth,
   creditGivenTotal,
   creditPaidTotal,
   emptyNotes,
   moneyInHand,
   previousClose,
-  unpaidCreditReport,
   type UnpaidCreditLine,
 } from "@/lib/ledger/cash";
 import { addDays, formatDay, formatFull } from "@/lib/ledger/dates";
@@ -57,8 +55,6 @@ function ClosingPage() {
   const [confirmClear, setConfirmClear] = useState(false);
   const [liveCredit, setLiveCredit] = useState<{ given: CreditGiven[]; paid: CreditPayment[]; unpaid: number } | null>(null);
   const [liveAdvance, setLiveAdvance] = useState<{ held: number; lastDate: string; lastHeld: number; received: number; used: number; served: number; taken?: number; open: AdvanceLine[]; paid: AdvanceLine[]; tracked?: boolean } | null>(null);
-  const [advanceEdit, setAdvanceEdit] = useState<{ id: string; customer: string; mobile: string; service: string; amount: string } | null>(null);
-  const [advancePending, setAdvancePending] = useState(false);
   const [payouts, setPayouts] = useState<CentrePayout[]>([]);
   const [payAmount, setPayAmount] = useState<number | null>(null);
   const [payNote, setPayNote] = useState("");
@@ -142,16 +138,6 @@ function ClosingPage() {
   const excesses = lines.filter((line) => line.unfixed > 0);
   const shortTotal = shorts.reduce((sum, line) => sum + -line.unfixed, 0);
   const excessTotal = excesses.reduce((sum, line) => sum + line.unfixed, 0);
-  const payments = row.creditPaid ?? [];
-  const given = row.creditGiven ?? [];
-  const monthGiven = creditGivenInMonth(
-    [...book.cashCloses.filter((item) => item.date !== date), row],
-    date.slice(0, 7),
-  );
-  const creditReport = unpaidCreditReport(
-    [...book.cashCloses.filter((item) => item.date !== date), row],
-    (id) => book.employees.find((employee) => employee.id === id)?.name ?? "Staff not entered",
-  );
   const go = (next: string) => {
     void navigate({ search: { d: next } });
   };
@@ -258,116 +244,36 @@ function ClosingPage() {
           <h2 className="font-medium">Transfer to self or other accounts</h2>
           <div className="mt-3 grid gap-3 sm:grid-cols-2">
             <Field label="Amount transferred">
-              <MoneyField label="Amount transferred" value={row.profitTaken ?? 0} disabled={!editing} onChange={(amount) => patch({ profitTaken: amount ?? 0 })} />
+              <MoneyField label="Amount transferred" value={row.profitTaken ?? 0} disabled={locked} onChange={(amount) => patch({ profitTaken: amount ?? 0 })} />
             </Field>
             <label className="block text-sm">
               <span className="mb-1 block text-muted">Account</span>
               <input
                 className="h-11 w-full rounded-sm border border-line bg-bg px-3 text-base outline-none focus:border-accent disabled:opacity-70"
                 value={row.profitNote ?? ""}
-                disabled={!editing}
+                disabled={locked}
                 placeholder="Own account"
                 onChange={(event) => patch({ profitNote: event.target.value.slice(0, 80) })}
               />
             </label>
           </div>
-          <ProfitMonth date={date} row={row} closes={book.cashCloses} />
-        </section>
-      ) : null}
-
-      {(role === "admin" || role === "closer") && liveAdvance && (liveAdvance.open.length > 0 || liveAdvance.paid.length > 0) ? (
-        <section className="mx-auto mt-3 max-w-lg rounded-xl border border-line bg-surface p-4">
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div>
-              <h2 className="text-sm font-medium">Advance to serve</h2>
-              {liveAdvance.received > 0 ? <p className="mt-1 text-xs tabular-nums text-muted">Received {inr(liveAdvance.received)}</p> : null}
-              <ul className="mt-2 divide-y divide-line">
-                {liveAdvance.open.map((line) => (
-                  <li key={line.id} className="py-1.5 text-sm">
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="min-w-0 truncate">{line.customer}</span>
-                      <span className="flex shrink-0 items-center gap-2">
-                        <span className="tabular-nums">{inr(line.amount)}</span>
-                        {role === "admin" ? (
-                          <Button size="sm" variant="secondary" className="no-print" disabled={advancePending} onClick={() => setAdvanceEdit({ id: line.id, customer: line.customer, mobile: line.mobile, service: line.service, amount: String(line.amount) })}>
-                            Edit
-                          </Button>
-                        ) : null}
-                      </span>
-                    </div>
-                    {role === "admin" && advanceEdit?.id === line.id ? (
-                      <AdvanceEditFields edit={advanceEdit} pending={advancePending} onChange={setAdvanceEdit} onCancel={() => setAdvanceEdit(null)} onSave={() => saveClosingAdvance(advanceEdit, date, setAdvancePending, setAdvanceEdit, setLiveAdvance, setResult)} />
-                    ) : null}
-                  </li>
-                ))}
-              </ul>
-              {liveAdvance.open.length === 0 ? <p className="mt-2 text-sm text-muted">None</p> : null}
-            </div>
-            <div>
-              <h2 className="text-sm font-medium">Service given</h2>
-              {liveAdvance.used > 0 ? <p className="mt-1 text-xs tabular-nums text-muted">Given {inr(liveAdvance.used)}</p> : null}
-              <ul className="mt-2 divide-y divide-line">
-                {liveAdvance.paid.map((line) => (
-                  <li key={line.id} className="py-1.5 text-sm">
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="min-w-0 truncate">{line.customer}</span>
-                      <span className="flex shrink-0 items-center gap-2">
-                        <span className="tabular-nums">{inr(line.amount)}</span>
-                        {role === "admin" ? (
-                          <Button size="sm" variant="secondary" className="no-print" disabled={advancePending} onClick={() => setAdvanceEdit({ id: line.id, customer: line.customer, mobile: line.mobile, service: line.service, amount: String(line.amount) })}>
-                            Edit
-                          </Button>
-                        ) : null}
-                      </span>
-                    </div>
-                    {role === "admin" && advanceEdit?.id === line.id ? (
-                      <AdvanceEditFields edit={advanceEdit} pending={advancePending} onChange={setAdvanceEdit} onCancel={() => setAdvanceEdit(null)} onSave={() => saveClosingAdvance(advanceEdit, date, setAdvancePending, setAdvanceEdit, setLiveAdvance, setResult)} />
-                    ) : null}
-                  </li>
-                ))}
-              </ul>
-              {liveAdvance.paid.length === 0 ? <p className="mt-2 text-sm text-muted">None</p> : null}
-            </div>
-          </div>
-        </section>
-      ) : null}
-
-      <section className="mx-auto mt-3 max-w-lg rounded-xl border border-line bg-surface p-4">
-        <div className="flex flex-wrap items-baseline justify-between gap-3">
-          <h2 className="font-medium">Credit</h2>
-          <div className="flex items-center gap-3">
-            <p className="text-sm tabular-nums text-muted">Unpaid {inr(row.credits)}</p>
+          {locked ? null : (
             <Button
-              className="no-print"
-              size="sm"
-              variant="secondary"
-              onClick={() => downloadUnpaid(book.centreName, date, creditReport)}
+              className="no-print mt-3"
+              onClick={() => {
+                const next = { ...row, date, countedBy: row.countedBy || user?.displayName?.trim() || "Admin" };
+                book.setCashClose(next);
+                setResult({ ok: true, message: "Transfer saved." });
+                void pushClose(date, next).catch((error: unknown) => {
+                  setResult({ ok: false, message: error instanceof Error ? error.message : "Saved on this browser, but not shared." });
+                });
+              }}
             >
-              Download unpaid
+              Save
             </Button>
-          </div>
-        </div>
-        {given.length > 0 ? (
-          <CreditGiven
-            editing={false}
-            rows={given}
-            staff={book.employees}
-            stillUnpaid={row.credits}
-            monthGiven={monthGiven}
-            onChange={(creditGiven, credits) => patch({ creditGiven, credits })}
-          />
-        ) : null}
-        {payments.length > 0 ? (
-          <CreditPaid
-            editing={false}
-            payments={payments}
-            paid={paid}
-            lastCredits={previous?.credits ?? 0}
-            stillUnpaid={row.credits}
-            onChange={(creditPaid, credits) => patch({ creditPaid, credits })}
-          />
-        ) : null}
-      </section>
+          )}
+        </section>
+      ) : null}
 
       <section className="mx-auto mt-3 max-w-lg rounded-xl border border-line bg-surface p-4 text-center">
         <h2 className="font-medium">Total closing</h2>
@@ -903,31 +809,6 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
       <span className="mb-1 block text-muted">{label}</span>
       {children}
     </label>
-  );
-}
-
-function ProfitMonth({ date, row, closes }: { date: string; row: CashClose; closes: CashClose[] }) {
-  const month = date.slice(0, 7);
-  const lines = [...closes.filter((item) => item.date !== date), row]
-    .filter((item) => item.date.startsWith(month) && (item.profitTaken ?? 0) > 0)
-    .sort((a, b) => (a.date < b.date ? -1 : 1));
-  const total = lines.reduce((sum, item) => sum + (item.profitTaken ?? 0), 0);
-  if (total <= 0) return null;
-  return (
-    <div className="mt-4">
-      <p className="text-sm text-muted">Transferred this month <span className="font-medium tabular-nums text-ink">{inr(total)}</span></p>
-      <ul className="mt-2 divide-y divide-line">
-        {lines.map((item) => (
-          <li key={item.date} className="flex items-center justify-between gap-3 py-2 text-sm">
-            <span>
-              {formatDay(item.date)}
-              {item.profitNote ? <span className="mt-0.5 block text-xs text-faint">{item.profitNote}</span> : null}
-            </span>
-            <span className="tabular-nums">{inr(item.profitTaken ?? 0)}</span>
-          </li>
-        ))}
-      </ul>
-    </div>
   );
 }
 

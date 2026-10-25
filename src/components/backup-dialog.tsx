@@ -5,6 +5,7 @@ import { ResultDialog, type Result } from "@/components/result-dialog";
 import { exportArchiveSlice, importArchivePart, listBackups, restoreBackup } from "@/lib/centre.functions";
 import { useLedger } from "@/lib/ledger/store";
 import type { LedgerData } from "@/lib/ledger/types";
+import { formatDay } from "@/lib/ledger/dates";
 
 export function BackupDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
   const book = useLedger();
@@ -15,12 +16,19 @@ export function BackupDialog({ open, onOpenChange }: { open: boolean; onOpenChan
     setResult({ ok, message });
   };
   const [backups, setBackups] = useState<{ id: string; takenOn: string }[]>([]);
+  const [listNote, setListNote] = useState("");
 
   useEffect(() => {
     if (!open) return;
     void listBackups()
-      .then(setBackups)
-      .catch(() => setBackups([]));
+      .then((rows) => {
+        setBackups(rows.filter((row) => row.takenOn));
+        setListNote("");
+      })
+      .catch((error: unknown) => {
+        setBackups([]);
+        setListNote(error instanceof Error ? error.message : "The saved copies did not open.");
+      });
   }, [open]);
 
   return (
@@ -28,9 +36,35 @@ export function BackupDialog({ open, onOpenChange }: { open: boolean; onOpenChan
       open={open}
       onOpenChange={onOpenChange}
       title="Backup"
-      description="Neon keeps the last 7 days. Download a file each month and keep it in Google Drive."
+      description="Neon keeps a copy for each of the last 7 days. Restore puts that day's book back."
     >
-      <div className="grid gap-2">
+      <div className="rounded-lg border border-line p-3">
+        <p className="text-sm font-medium">Saved copies</p>
+        {listNote ? <p className="mt-2 text-sm text-warn">{listNote}</p> : null}
+        {backups.length === 0 && !listNote ? <p className="mt-2 text-sm text-muted">No copy yet. Open Backup again after the next charge or closing.</p> : null}
+        <ul className="mt-2 divide-y divide-line">
+          {backups.map((copy) => (
+            <li key={copy.id} className="flex items-center justify-between gap-3 py-2 text-sm">
+              <span className="font-medium">{formatDay(copy.takenOn)}</span>
+              <Button
+                size="sm"
+                variant="secondary"
+                onClick={() => {
+                  void restoreBackup({ data: copy.id })
+                    .then((saved) => {
+                      book.replaceBook(saved.book);
+                      setNotice(`Restored the copy from ${formatDay(copy.takenOn)}.`);
+                    })
+                    .catch((error: unknown) => setNotice(error instanceof Error ? error.message : "Could not restore that copy."));
+                }}
+              >
+                Restore
+              </Button>
+            </li>
+          ))}
+        </ul>
+      </div>
+      <div className="mt-4 grid gap-2">
         <Button
           variant="secondary"
           onClick={() => {
@@ -63,32 +97,6 @@ export function BackupDialog({ open, onOpenChange }: { open: boolean; onOpenChan
             }
           }}
         />
-      </div>
-      <div className="mt-4 rounded-lg border border-line p-3">
-        <p className="text-sm font-medium">Saved copies</p>
-        <p className="mt-1 text-xs text-muted">The last 7 days. Restore puts that day's closing back. Your downloaded file is the long copy.</p>
-        {backups.length === 0 ? <p className="mt-2 text-sm text-muted">No copy yet. It is saved the next time the book changes.</p> : null}
-        <ul className="mt-2 divide-y divide-line">
-          {backups.map((copy) => (
-            <li key={copy.id} className="flex items-center justify-between gap-3 py-2 text-sm">
-              <span>{copy.takenOn}</span>
-              <Button
-                size="sm"
-                variant="secondary"
-                onClick={() => {
-                  void restoreBackup({ data: copy.id })
-                    .then((saved) => {
-                      book.replaceBook(saved.book);
-                      setNotice(`Restored the copy from ${copy.takenOn}.`);
-                    })
-                    .catch((error: unknown) => setNotice(error instanceof Error ? error.message : "Could not restore that copy."));
-                }}
-              >
-                Restore
-              </Button>
-            </li>
-          ))}
-        </ul>
       </div>
       <ResultDialog result={result} onClose={() => setResult(null)} />
     </Modal>

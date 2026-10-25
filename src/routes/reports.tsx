@@ -24,6 +24,7 @@ const MENU: { id: ReportKind; label: string }[] = [
   { id: "staff", label: "Staff and pay" },
   { id: "expenses", label: "Expenses" },
   { id: "leave", label: "Leave" },
+  { id: "transfers", label: "Transfers" },
   { id: "logins", label: "Logins" },
 ];
 
@@ -153,6 +154,8 @@ function ReportsPage() {
 
       {kind === "logins" ? (
         <LoginStatement date={logDate} />
+      ) : kind === "transfers" ? (
+        <TransferStatement fy={fy} closes={book.cashCloses} />
       ) : shown.length === 0 ? (
         <p className="rounded-xl border border-line bg-surface p-5 text-sm text-muted">Nothing entered for {fyLabel(fy)}.</p>
       ) : kind === "centre" ? (
@@ -183,6 +186,7 @@ function titleOf(kind: ReportKind): string {
   if (kind === "expenses") return "Expenses";
   if (kind === "leave") return "Leave";
   if (kind === "logins") return "Login log";
+  if (kind === "transfers") return "Transfers to self";
   return "Centre statement";
 }
 
@@ -195,6 +199,27 @@ async function buildReportWorkbook(
   book: LedgerData,
 ): Promise<{ name: string; sheets: Sheet[] }> {
   const safeYear = yearLabel.replace(/\s+/g, "");
+  if (kind === "transfers") {
+    const match = yearLabel.match(/(\d{4})/);
+    const start = match ? Number(match[1]) : NaN;
+    const months = Number.isFinite(start) ? fyMonths(start) : [];
+    const lines = book.cashCloses
+      .filter((item) => months.includes(item.date.slice(0, 7)) && (item.profitTaken ?? 0) > 0)
+      .sort((a, b) => (a.date < b.date ? -1 : 1));
+    return {
+      name: `Transfers-${safeYear}.xlsx`,
+      sheets: [
+        {
+          name: "Transfers",
+          rows: [
+            ["Date", "Account", "Amount"],
+            ...lines.map((item) => [formatDay(item.date), item.profitNote || "Own account", item.profitTaken ?? 0]),
+            ["Total", "", lines.reduce((sum, item) => sum + (item.profitTaken ?? 0), 0)],
+          ],
+        },
+      ],
+    };
+  }
   if (kind === "logins") {
     const rows = logDate ? await loginLog({ data: logDate }) : [];
     return {
@@ -710,6 +735,49 @@ function AttendanceCell({ item }: { item: MonthAttendance }) {
       </span>
       {codes ? <span className="mt-0.5 block text-xs text-faint">{codes}</span> : null}
     </td>
+  );
+}
+
+function TransferStatement({ fy, closes }: { fy: number; closes: { date: string; profitTaken?: number; profitNote?: string }[] }) {
+  const months = fyMonths(fy);
+  const lines = closes
+    .filter((item) => months.includes(item.date.slice(0, 7)) && (item.profitTaken ?? 0) > 0)
+    .sort((a, b) => (a.date < b.date ? -1 : 1));
+  const total = lines.reduce((sum, item) => sum + (item.profitTaken ?? 0), 0);
+  const byMonth = months
+    .map((month) => {
+      const rows = lines.filter((item) => item.date.startsWith(month));
+      const amount = rows.reduce((sum, item) => sum + (item.profitTaken ?? 0), 0);
+      return { month, rows, amount };
+    })
+    .filter((item) => item.amount > 0);
+  if (lines.length === 0) return <p className="rounded-xl border border-line bg-surface p-5 text-sm text-muted">No transfer in {fyLabel(fy)}.</p>;
+  return (
+    <section className="rounded-xl border border-line bg-surface p-5">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <h2 className="font-display text-2xl">Transferred</h2>
+        <p className="font-display text-3xl tabular-nums">{inr(total)}</p>
+      </div>
+      {byMonth.map((group) => (
+        <div key={group.month} className="mt-4">
+          <div className="flex items-baseline justify-between gap-3">
+            <h3 className="text-sm font-medium">{formatMonthShort(group.month)}</h3>
+            <p className="tabular-nums">{inr(group.amount)}</p>
+          </div>
+          <ul className="mt-1 divide-y divide-line">
+            {group.rows.map((item) => (
+              <li key={item.date} className="flex items-center justify-between gap-3 py-2 text-sm">
+                <span>
+                  {formatDay(item.date)}
+                  {item.profitNote ? <span className="mt-0.5 block text-xs text-faint">{item.profitNote}</span> : null}
+                </span>
+                <span className="tabular-nums">{inr(item.profitTaken ?? 0)}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ))}
+    </section>
   );
 }
 

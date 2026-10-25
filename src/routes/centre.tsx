@@ -3,6 +3,7 @@ import { useState } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { Bar, CartesianGrid, ComposedChart, Line, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { MoneyField } from "@/components/money-field";
+import { MonthBar } from "@/components/month-bar";
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import { chartColors } from "@/lib/chart-colors";
@@ -53,6 +54,22 @@ function CentrePage() {
   const [day, setDay] = useState(today || "");
   const inThisYear = rows.find((row) => row.month === picked);
   const selected = inThisYear ?? visible[visible.length - 1] ?? rows[0];
+  const monthSnap =
+    inThisYear ??
+    centreSnapshot(
+      book.employees,
+      book.days,
+      book.perfOverrides,
+      book.leaves,
+      book.holidays,
+      book.expenses,
+      book.lyOverrides,
+      picked,
+      book.deductLwp,
+      today,
+      book.payouts ?? [],
+      book.salaryPaid ?? [],
+    );
 
   const totals = visible.reduce(
     (sum, row) => ({
@@ -141,16 +158,17 @@ function CentrePage() {
         {view === "day" ? (
           <input type="date" aria-label="Statement date" className="h-11 rounded-sm border border-line bg-bg px-3 text-base" value={day || today} onChange={(event) => setDay(event.target.value)} />
         ) : null}
+        {view === "month" ? <MonthBar month={picked} onChange={setPicked} /> : null}
       </div>
       {view === "day" ? <DayStatement date={day || today} /> : null}
-      {view === "month" && selected ? (
+      {view === "month" ? (
         <section className="mt-4 rounded-xl border border-line bg-surface p-5">
-          <h2 className="font-display text-2xl">{formatMonthShort(selected.month)}</h2>
+          <h2 className="font-display text-2xl">{formatMonthShort(monthSnap.month)}</h2>
           <div className="mt-3 grid gap-3 sm:grid-cols-4">
-            <Mini label="Collection" value={inr(selected.collection)} />
-            <Mini label="Expense" value={inr(selected.expense)} />
-            <Mini label="Salary" value={inr(selected.salary)} />
-            <Mini label="Growth vs last year" value={selected.growth == null ? "—" : `${signedInr(selected.growth)} · ${pct(selected.growthPct)}`} />
+            <Mini label="Collection" value={inr(monthSnap.collection)} />
+            <Mini label="Expense" value={inr(monthSnap.expense)} />
+            <Mini label="Salary" value={inr(monthSnap.salary)} />
+            <Mini label="Growth vs last year" value={monthSnap.growth == null ? "—" : `${signedInr(monthSnap.growth)} · ${pct(monthSnap.growthPct)}`} />
           </div>
         </section>
       ) : null}
@@ -229,7 +247,8 @@ function CentrePage() {
       </>
       ) : null}
 
-      {view !== "day" && selected ? <MonthDetail row={selected} onCommit={(amount) => book.setLastYear(selected.month, amount)} /> : null}
+      {view === "month" ? <MonthDetail row={monthSnap} onCommit={(amount) => book.setLastYear(monthSnap.month, amount)} /> : null}
+      {view === "year" && selected ? <MonthDetail row={selected} onCommit={(amount) => book.setLastYear(selected.month, amount)} /> : null}
     </div>
   );
 }

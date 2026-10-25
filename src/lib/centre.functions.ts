@@ -1407,14 +1407,6 @@ export const loadSharedBook = createServerFn({ method: "GET" })
     const row = rows[0];
     if (!row) return null;
     let stored = asJson(row.data);
-    if (indiaClock() >= "14:00:00") {
-      const clocks = await todayStaffClocks(sql, stored);
-      const marked = applyLiveHalfDay(stored, clocks);
-      if (!sameLeaves(stored.leaves ?? [], marked.leaves ?? [])) {
-        await writeBook(sql, marked, asJson(row.touches) ?? {});
-        stored = marked;
-      }
-    }
     const savedPayouts = stored.payouts ?? [];
     delete stored.payouts;
     const fromTable = role === "employee" ? [] : (await readPayouts(sql, context.userId)).map(({ mine: _mine, ...item }) => item);
@@ -1475,6 +1467,15 @@ export const addServiceEntry = createServerFn({ method: "POST" })
         where taken_on = ${date} and user_id = ${context.userId}`;
       return Number(mine[0]?.total ?? 0);
     });
+    try {
+      const { getSql } = await import("@/lib/db");
+      const sql = await getSql();
+      const fresh = await sql<{ data: LedgerData | string }>`select data from centre_book where id = 'centre'`;
+      const book = fresh[0] ? asJson(fresh[0].data) : null;
+      if (book?.centreName) await keepDailyBackup(sql, book);
+    } catch {
+      // A backup problem must not block the charge.
+    }
     return { total };
   });
 
@@ -1956,21 +1957,6 @@ async function resyncCounterSplits(
     select taken_on::text as taken_on, staff_name, coalesce(sum(amount), 0)::int as amount
     from service_entry group by taken_on, staff_name
   `;
-  const clocks = await sql<{ taken_on: string; staff_name: string; first_at: string; last_at: string }>`
-    select taken_on::text as taken_on, staff_name,
-      to_char(min(created_at at time zone 'Asia/Kolkata'), 'HH24:MI:SS') as first_at,
-      to_char(max(created_at at time zone 'Asia/Kolkata'), 'HH24:MI:SS') as last_at
-    from service_entry group by taken_on, staff_name
-  `;
-  const clockByDate = new Map<string, Map<string, { first: string; last: string }>>();
-  for (const entry of clocks) {
-    const date = String(entry.taken_on).slice(0, 10);
-    const employee = (book.employees ?? []).find((person) => normStaffName(person.name) === normStaffName(entry.staff_name));
-    if (!employee) continue;
-    const byStaff = clockByDate.get(date) ?? new Map<string, { first: string; last: string }>();
-    byStaff.set(employee.id, { first: entry.first_at, last: entry.last_at });
-    clockByDate.set(date, byStaff);
-  }
   const gpayRows = await sql<{ taken_on: string; amount: number; department: number }>`
     select taken_on::text as taken_on, coalesce(sum(amount), 0)::int as amount, coalesce(sum(department), 0)::int as department
     from service_entry where personal_gpay group by taken_on
@@ -1981,7 +1967,7 @@ async function resyncCounterSplits(
     from service_entry group by taken_on
   `;
   const bankByDate = new Map(bankRows.map((entry) => [String(entry.taken_on).slice(0, 10), Number(entry.amount) || 0]));
-  if (rows.length === 0) return { book: applyLiveHalfDay(book, clockByDate.get(indiaToday()) ?? new Map()), dates: [] };
+  if (rows.length === 0) return { book, dates: [] };
   await ensureCustomerTable(sql);
   const creditRows = await sql<{ taken_on: string; amount: number }>`
     select s.taken_on::text as taken_on, coalesce(sum(s.amount), 0)::int as amount
@@ -2031,82 +2017,13 @@ async function resyncCounterSplits(
   let next: LedgerData = { ...book, days };
   const today = indiaToday();
   for (const date of byDate.keys()) {
-    if (date < today) next = applyImportedLeave(next, date, clockByDate.get(date));
+    if (date < today) next = applyImportedLeave(next, date);
   }
-  next = applyLiveHalfDay(next, clockByDate.get(today) ?? new Map());
   return { book: next, dates: [...byDate.keys()] };
-}
-
-function wallClock(value: unknown): string {
-  if (value == null || value === "") return "";
-  if (value instanceof Date) {
-    const text = new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" }).format(value);
-    return text.slice(0, 8);
-  }
-  const text = String(value);
-  if (text.includes("T") || text.endsWith("Z")) {
-    const date = new Date(text);
-    if (!Number.isNaN(date.getTime())) {
-      const local = new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" }).format(date);
-      return local.slice(0, 8);
-    }
-  }
-  const match = text.match(/(\d{2}):(\d{2}):(\d{2})/);
-  return match ? `${match[1]}:${match[2]}:${match[3]}` : "";
 }
 
 function indiaToday(): string {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(new Date());
-}
-
-function indiaClock(): string {
-  return new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" }).format(new Date()).slice(0, 8);
-}
-
-function sameLeaves(left: { employeeId: string; date: string; code: string }[], right: { employeeId: string; date: string; code: string }[]): boolean {
-  if (left.length !== right.length) return false;
-  const key = (mark: { employeeId: string; date: string; code: string }) => `${mark.employeeId}|${mark.date}|${mark.code}`;
-  const a = left.map(key).sort();
-  const b = right.map(key).sort();
-  return a.every((item, index) => item === b[index]);
-}
-
-async function todayStaffClocks(
-  sql: Awaited<ReturnType<typeof import("@/lib/db").getSql>>,
-  book: LedgerData,
-): Promise<Map<string, { first: string; last: string }>> {
-  await ensureServiceTable(sql);
-  const today = indiaToday();
-  const rows = await sql<{ staff_name: string; first_at: string }>`
-    select staff_name, to_char(min(created_at at time zone 'Asia/Kolkata'), 'HH24:MI:SS') as first_at
-    from service_entry where taken_on = ${today} group by staff_name
-  `;
-  const clocks = new Map<string, { first: string; last: string }>();
-  for (const entry of rows) {
-    const employee = (book.employees ?? []).find((person) => normStaffName(person.name) === normStaffName(entry.staff_name));
-    if (!employee) continue;
-    clocks.set(employee.id, { first: entry.first_at, last: entry.first_at });
-  }
-  return clocks;
-}
-
-/** Same-day half day. A first charge after 12:00 is half day. No charge at all by 14:00 is half day too. */
-function applyLiveHalfDay(book: LedgerData, clocks: Map<string, { first: string; last: string }>): LedgerData {
-  const date = indiaToday();
-  if (isSunday(date) || (book.holidays ?? []).includes(date)) return book;
-  const afterTwo = indiaClock() >= "14:00:00";
-  let leaves = [...(book.leaves ?? [])];
-  for (const employee of book.employees ?? []) {
-    if (!employee.active) continue;
-    const previous = (book.leaves ?? []).find((mark) => mark.employeeId === employee.id && mark.date === date);
-    if (previous && previous.code !== "HD") continue;
-    const first = wallClock(clocks.get(employee.id)?.first);
-    const worked = first !== "";
-    const code = worked ? (first > "12:00:00" ? "HD" : null) : !afterTwo && previous?.code !== "HD" ? null : "HD";
-    leaves = leaves.filter((mark) => mark.employeeId !== employee.id || mark.date !== date || mark.code !== "HD");
-    if (code) leaves.push({ employeeId: employee.id, date, code });
-  }
-  return { ...book, leaves };
 }
 
 async function ensureServiceTable(sql: Awaited<ReturnType<typeof import("@/lib/db").getSql>>) {
@@ -2305,9 +2222,23 @@ export const listBackups = createServerFn({ method: "GET" })
     const { getSql } = await import("@/lib/db");
     const sql = await getSql();
     await ensureBackupTable(sql);
-    return sql<{ id: string; takenOn: string }>`
-      select id, taken_on as "takenOn" from centre_backup order by taken_on desc limit 30
+    const current = await sql<{ data: LedgerData | string }>`select data from centre_book where id = 'centre'`;
+    const stored = current[0] ? asJson(current[0].data) : null;
+    if (stored?.centreName) {
+      try {
+        await keepDailyBackup(sql, stored);
+      } catch {
+        // Still show any copies already saved.
+      }
+    }
+    const rows = await sql<{ id: string; takenOn: string }>`
+      select id, to_char(taken_on, 'YYYY-MM-DD') as "takenOn" from centre_backup order by taken_on desc limit 7
     `;
+    return rows.map((row) => {
+      const record = row as { id?: string; takenOn?: string; takenon?: string };
+      const takenOn = String(record.takenOn || record.takenon || record.id || "").slice(0, 10);
+      return { id: String(record.id || takenOn), takenOn };
+    });
   });
 
 export const restoreBackup = createServerFn({ method: "POST" })
@@ -2824,36 +2755,26 @@ function mergeBook(
   };
 }
 
-function applyImportedLeave(
-  book: LedgerData,
-  date: string,
-  clocks: Map<string, { first: string; last: string }> = new Map(),
-): LedgerData {
-  const day = book.days.find((item) => item.date === date);
+function applyImportedLeave(book: LedgerData, date: string): LedgerData {
+  if (date >= indiaToday()) return book;
+  const day = book.days.find(
+    (item) => item.date === date && item.amount > 0 && /^(Imported from aewskerala|Entered on the counter)/i.test(item.note),
+  );
   const closed = book.holidays.includes(date) || isSunday(date);
   let leaves = book.leaves.filter((mark) => mark.date !== date || mark.code !== "LWP");
-  if (day && day.amount > 0 && /^(Imported from aewskerala|Entered on the counter)/i.test(day.note) && !closed) {
-    for (const employee of book.employees) {
-      if (!employee.active) continue;
-      const worked = (day.splits[employee.id] ?? 0) > 0;
-      const clock = clocks.get(employee.id);
-      // Half day only when the first charge is after 12:00 India time. A bare time is already India time.
-      // A full timestamp must not be compared as text, or every staff member becomes a half day.
-      const first = wallClock(clock?.first);
-      const half = first > "12:00:00";
-      if (worked) {
-        const previous = book.leaves.find((mark) => mark.employeeId === employee.id && mark.date === date);
-        if (previous && previous.code !== "LWP" && previous.code !== "HD") continue;
-        leaves = leaves.filter((mark) => mark.employeeId !== employee.id || mark.date !== date);
-        if (half) leaves.push({ employeeId: employee.id, date, code: "HD" });
-        continue;
-      }
-      const previous = book.leaves.find((mark) => mark.employeeId === employee.id && mark.date === date);
-      if (previous && previous.code !== "LWP") continue;
-      if (!leaves.some((mark) => mark.employeeId === employee.id && mark.date === date)) {
-        leaves.push({ employeeId: employee.id, date, code: "LWP" });
-      }
+  if (!day || closed) return { ...book, leaves };
+  for (const employee of book.employees) {
+    if (!employee.active) continue;
+    const previous = book.leaves.find((mark) => mark.employeeId === employee.id && mark.date === date);
+    const worked = (day.splits[employee.id] ?? 0) > 0;
+    if (worked) {
+      leaves = leaves.filter((mark) => mark.employeeId !== employee.id || mark.date !== date);
+      if (previous && previous.code !== "LWP") leaves.push(previous);
+      continue;
     }
+    if (previous && previous.code !== "LWP" && previous.code !== "HD") continue;
+    leaves = leaves.filter((mark) => mark.employeeId !== employee.id || mark.date !== date);
+    leaves.push({ employeeId: employee.id, date, code: "LWP" });
   }
   return { ...book, leaves };
 }
