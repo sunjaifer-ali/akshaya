@@ -348,8 +348,8 @@ export type { Desk };
 
 export function deskOf(employee: Employee): Desk {
   if (employee.desk === "aadhaar" || employee.desk === "service" || employee.desk === "support") return employee.desk;
-  const name = employee.name.trim().toLowerCase();
-  const role = employee.role.toLowerCase();
+  const name = (employee.name ?? "").trim().toLowerCase();
+  const role = (employee.role ?? "").toLowerCase();
   if (role.includes("aadhaar") || role.includes("aadhar")) return "aadhaar";
   if (role.includes("support") || role.includes("new") || role.includes("trainee") || role.includes("joinee")) return "support";
   if (role.includes("service") || role.includes("middle")) return "service";

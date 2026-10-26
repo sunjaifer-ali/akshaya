@@ -131,15 +131,6 @@ export function Shell({ children }: { children: ReactNode }) {
           return;
         }
         setBlocked("");
-        const here = window.location.pathname;
-        if (next === "employee" && !["/counter", "/bill", "/credit", "/note", "/payments", "/diary", "/gpay"].includes(here)) {
-          window.location.replace("/counter");
-          return;
-        }
-        if (next === "closer" && here !== "/closing" && here !== "/counter") {
-          window.location.replace("/closing");
-          return;
-        }
         setRole(next);
         try {
           await startSharing(next);
@@ -196,8 +187,7 @@ export function Shell({ children }: { children: ReactNode }) {
   const staffPath = pathname === "/counter" || pathname === "/bill" || pathname === "/credit" || pathname === "/note" || pathname === "/payments" || pathname === "/diary" || pathname === "/gpay";
   const closerPath = pathname === "/closing" || pathname === "/counter";
 
-  if (authEnabled && (!mounted || isPending || role === "loading")) {
-    if (mounted && !isPending && !user) return <RedirectToSignIn />;
+  if (authEnabled && (!mounted || isPending || (user && role === "loading"))) {
     return <p className="grid min-h-dvh place-items-center text-sm text-muted">Opening the book…</p>;
   }
 
