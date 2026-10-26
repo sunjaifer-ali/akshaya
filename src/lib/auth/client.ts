@@ -47,6 +47,8 @@ export { GROK_PROVIDERS };
 // preview after a popup sign-in, so the cookie path is untouched elsewhere.
 const BEARER_KEY = "grok-auth.bearer-token";
 const DESK_OPEN_KEY = "akshaya-desk-open";
+const IDLE_KEY = "akshaya-idle-at";
+const IDLE_LIMIT = 2 * 60 * 60 * 1000;
 
 /** The stored preview bearer token, or null. */
 export function getBearerToken(): string | null {
@@ -67,6 +69,46 @@ export function markDeskOpen(): void {
   }
 }
 
+export function watchIdle(onIdle: () => void): () => void {
+  if (typeof window === "undefined") return () => undefined;
+  const stamp = () => {
+    try {
+      window.localStorage.setItem(IDLE_KEY, String(Date.now()));
+    } catch {
+      /* storage unavailable — ignore */
+    }
+  };
+  const idle = () => {
+    let last = Date.now();
+    try {
+      last = Number(window.localStorage.getItem(IDLE_KEY) || Date.now());
+    } catch {
+      last = Date.now();
+    }
+    if (Number.isFinite(last) && Date.now() - last >= IDLE_LIMIT) onIdle();
+  };
+  stamp();
+  let written = Date.now();
+  const mark = () => {
+    const now = Date.now();
+    if (now - written < 30_000) return;
+    written = now;
+    stamp();
+  };
+  const events = ["pointerdown", "keydown", "scroll", "touchstart"] as const;
+  for (const event of events) window.addEventListener(event, mark, { passive: true });
+  const timer = window.setInterval(idle, 60_000);
+  const onShow = () => {
+    if (document.visibilityState === "visible") idle();
+  };
+  document.addEventListener("visibilitychange", onShow);
+  return () => {
+    for (const event of events) window.removeEventListener(event, mark);
+    window.clearInterval(timer);
+    document.removeEventListener("visibilitychange", onShow);
+  };
+}
+
 export function deskIsOpen(): boolean {
   if (typeof window === "undefined") return false;
   try {
@@ -81,7 +123,10 @@ function setBearerToken(token: string | null): void {
   try {
     if (token) window.sessionStorage.setItem(BEARER_KEY, token);
     else window.sessionStorage.removeItem(BEARER_KEY);
-    if (!token) window.sessionStorage.removeItem(DESK_OPEN_KEY);
+    if (!token) {
+      window.sessionStorage.removeItem(DESK_OPEN_KEY);
+      window.localStorage.removeItem(IDLE_KEY);
+    }
   } catch {
     /* storage unavailable — ignore */
   }

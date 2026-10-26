@@ -8,7 +8,7 @@ import { ResultDialog, type Result } from "@/components/result-dialog";
 import { Button } from "@/components/ui/button";
 import { chartColors } from "@/lib/chart-colors";
 import { inr, pct } from "@/lib/format";
-import { centreSnapshot, dayOn, monthCollection, recordedAttendance, staffMonthRows } from "@/lib/ledger/calc";
+import { centreSnapshot, dayOn, DESK_LABEL, deskOf, monthCollection, recordedAttendance, staffMonthRows } from "@/lib/ledger/calc";
 import { formatMonthShort, fyLabel, fyMonths, fyStartYear, isSunday } from "@/lib/ledger/dates";
 import { useLedger } from "@/lib/ledger/store";
 import { LEAVE_LABEL, type Employee } from "@/lib/ledger/types";
@@ -157,7 +157,7 @@ function StaffPage() {
                     <td className="px-3 py-3">
                       <span className="font-medium">{row.employee.name}</span>
                       <span className="mt-0.5 block text-xs text-faint">
-                        {row.employee.role}
+                        {DESK_LABEL[deskOf(row.employee)]}
                         {row.employee.active ? "" : " · Inactive"}
                       </span>
                     </td>
@@ -253,7 +253,7 @@ function StaffPage() {
               <li key={employee.id} className="flex items-center justify-between gap-3 py-2 text-sm">
                 <span>
                   {employee.name}
-                  <span className="mt-0.5 block text-xs text-faint">{employee.role}</span>
+                  <span className="mt-0.5 block text-xs text-faint">{DESK_LABEL[deskOf(employee)]}</span>
                 </span>
                 <Button size="sm" variant="secondary" onClick={() => book.setEmployeeActive(employee.id, true)}>
                   Activate

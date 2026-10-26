@@ -256,6 +256,7 @@ function NoticeBoard({ admin }: { admin: boolean }) {
             <Pick on={picked.includes("all")} label="Everyone" onToggle={() => toggle("all")} />
             <Pick on={picked.includes("desk:aadhaar")} label="Aadhaar desk" onToggle={() => toggle("desk:aadhaar")} />
             <Pick on={picked.includes("desk:service")} label="Service desk" onToggle={() => toggle("desk:service")} />
+            <Pick on={picked.includes("desk:support")} label="Support desk" onToggle={() => toggle("desk:support")} />
             {people.map((person) => (
               <Pick key={person.id} on={picked.includes(`staff:${person.id}`)} label={person.name} onToggle={() => toggle(`staff:${person.id}`)} />
             ))}

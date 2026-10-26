@@ -1,9 +1,12 @@
 export type LeaveCode = "CL" | "SL" | "LWP" | "HD" | "WO";
 
+export type Desk = "aadhaar" | "service" | "support";
+
 export type Employee = {
   id: string;
   name: string;
   role: string;
+  desk?: Desk;
   basic: number;
   incentive: number;
   active: boolean;

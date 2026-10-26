@@ -2,6 +2,7 @@ import { datesInMonth, isSunday, lastYearMonth } from "@/lib/ledger/dates";
 import type {
   CentrePayout,
   CollectionDay,
+  Desk,
   Employee,
   LeaveCode,
   LeaveMark,
@@ -343,23 +344,25 @@ function applyPaidSalary(pay: PayBreakdown, paid: SalaryPaid | undefined, collec
   };
 }
 
-export type Desk = "aadhaar" | "service" | "new";
+export type { Desk };
 
 export function deskOf(employee: Employee): Desk {
+  if (employee.desk === "aadhaar" || employee.desk === "service" || employee.desk === "support") return employee.desk;
   const name = employee.name.trim().toLowerCase();
   const role = employee.role.toLowerCase();
   if (role.includes("aadhaar") || role.includes("aadhar")) return "aadhaar";
-  if (role.includes("new") || role.includes("trainee") || role.includes("joinee")) return "new";
+  if (role.includes("support") || role.includes("new") || role.includes("trainee") || role.includes("joinee")) return "support";
   if (role.includes("service") || role.includes("middle")) return "service";
   if (name.includes("ajitha") || name.includes("haseena") || name.includes("hasena")) return "aadhaar";
-  if (name.includes("rubeena")) return "new";
+  if (name.includes("sheena") || name.includes("sajini")) return "service";
+  if (name.includes("rubeena")) return "support";
   return "service";
 }
 
 export const DESK_LABEL: Record<Desk, string> = {
   aadhaar: "Aadhaar desk",
   service: "Service desk",
-  new: "New joinee",
+  support: "Support desk",
 };
 
 export type NoteTone = "good" | "warn" | "ink";
@@ -416,11 +419,11 @@ export function monthNote(
 
   let honour: NoteHonour = "soon";
   let sentence: string;
-  if (desk === "new" && peers.length < 2) {
+  if (peers.length < 2) {
     honour = "own";
     sentence = growth
-      ? "You are compared only with your own last month, not with the Aadhaar desk or the service desk."
-      : "This month is your base. From next month the note compares you with yourself, not with the senior desks.";
+      ? "You are compared only with your own last month."
+      : "This month is your base. From next month the note compares you with yourself.";
   } else if (share == null) {
     sentence = "Once this desk has counter charges, this note shows your share of that desk only.";
   } else if (share >= 55) {

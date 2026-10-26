@@ -7,7 +7,7 @@ import { cn } from "@/lib/cn";
 import { inr, signedInr } from "@/lib/format";
 import { diaryDesk, advanceDesk, customerCreditDesk, type OpenCredit } from "@/lib/centre.functions";
 import { accountLines, aewsCollection, checkClose, unpaidCreditReport } from "@/lib/ledger/cash";
-import { centreSnapshot, dayOn, monthCollection, staffMonthRows } from "@/lib/ledger/calc";
+import { centreSnapshot, dayOn, DESK_LABEL, deskOf, monthCollection, staffMonthRows } from "@/lib/ledger/calc";
 import { addDays, formatDay, formatFull, formatMonthShort, fyMonths, fyStartYear, isSunday } from "@/lib/ledger/dates";
 import { useLedger } from "@/lib/ledger/store";
 import type { CashClose, CollectionDay, Employee, LeaveMark } from "@/lib/ledger/types";
@@ -247,7 +247,7 @@ function DeskPage() {
                 <li key={row.employee.id} className="flex items-center justify-between gap-3 py-3">
                   <div>
                     <p className="text-sm font-medium">{row.employee.name}</p>
-                    <p className="text-xs text-faint">{mark ? leaveWord(mark.code) : row.employee.role}</p>
+                    <p className="text-xs text-faint">{mark ? leaveWord(mark.code) : DESK_LABEL[deskOf(row.employee)]}</p>
                   </div>
                   <p className="text-lg font-medium tabular-nums">{inr(row.collection)}</p>
                 </li>

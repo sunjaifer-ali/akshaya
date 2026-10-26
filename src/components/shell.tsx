@@ -15,6 +15,7 @@ import {
   Download,
   Menu,
   Receipt,
+  FileText,
   Settings,
   Users,
   Wallet,
@@ -27,7 +28,7 @@ import { BackupDialog } from "@/components/backup-dialog";
 import { CentreCredit } from "@/components/centre-credit";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/cn";
-import { authEnabled, deskIsOpen, signOut } from "@/lib/auth/client";
+import { authEnabled, deskIsOpen, signOut, watchIdle } from "@/lib/auth/client";
 import { RedirectToSignIn, UserButton } from "@/lib/auth/gates";
 import { useCurrentUserState } from "@/lib/auth/use-current-user";
 import { myRole, listNotices, recordLogin, type CentreRole } from "@/lib/centre.functions";
@@ -51,6 +52,7 @@ const NAV = [
   { to: "/centre", label: "Centre", icon: BarChart3, group: "Review", mobile: false },
   { to: "/reports", label: "Reports", icon: ClipboardList, group: "Review", mobile: false },
   { to: "/note", label: "Message", icon: NotebookPen, group: "Review", mobile: false },
+  { to: "/bill", label: "Bill", icon: FileText, group: "Today", mobile: false },
 ] as const;
 
 const GROUPS = ["Today", "Money", "People", "Review"] as const;
@@ -58,6 +60,7 @@ const GROUPS = ["Today", "Money", "People", "Review"] as const;
 const MORE_LABEL: Record<(typeof NAV)[number]["to"], string> = {
   "/": "Desk",
   "/counter": "Live counter",
+  "/bill": "Bill",
   "/gpay": "Personal GPay Payments",
   "/payments": "Payments",
   "/credit": "Credit and advances",
@@ -97,6 +100,13 @@ export function Shell({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
+    if (!authEnabled || !userId || pathname === "/login") return;
+    return watchIdle(() => {
+      void signOut("/login").catch(() => undefined);
+    });
+  }, [userId, pathname]);
+
+  useEffect(() => {
     if (!authEnabled || !mounted || pathname === "/login" || deskIsOpen()) return;
     window.location.replace("/login");
     void signOut("/login").catch(() => undefined);
@@ -121,6 +131,15 @@ export function Shell({ children }: { children: ReactNode }) {
           return;
         }
         setBlocked("");
+        const here = window.location.pathname;
+        if (next === "employee" && !["/counter", "/bill", "/credit", "/note", "/payments", "/diary", "/gpay"].includes(here)) {
+          window.location.replace("/counter");
+          return;
+        }
+        if (next === "closer" && here !== "/closing" && here !== "/counter") {
+          window.location.replace("/closing");
+          return;
+        }
         setRole(next);
         try {
           await startSharing(next);
@@ -174,7 +193,11 @@ export function Shell({ children }: { children: ReactNode }) {
 
   if (pathname === "/login") return <>{children}</>;
 
-  if (authEnabled && (!mounted || isPending || (user && role === "loading"))) {
+  const staffPath = pathname === "/counter" || pathname === "/bill" || pathname === "/credit" || pathname === "/note" || pathname === "/payments" || pathname === "/diary" || pathname === "/gpay";
+  const closerPath = pathname === "/closing" || pathname === "/counter";
+
+  if (authEnabled && (!mounted || isPending || role === "loading")) {
+    if (mounted && !isPending && !user) return <RedirectToSignIn />;
     return <p className="grid min-h-dvh place-items-center text-sm text-muted">Opening the book…</p>;
   }
 
@@ -196,18 +219,19 @@ export function Shell({ children }: { children: ReactNode }) {
     );
   }
 
-  if (role === "employee" && pathname !== "/counter" && pathname !== "/credit" && pathname !== "/note" && pathname !== "/payments" && pathname !== "/diary" && pathname !== "/gpay") return <Navigate to="/counter" />;
-  if (role === "closer" && pathname !== "/closing" && pathname !== "/counter") return <Navigate to="/closing" />;
+  if (role === "employee" && !staffPath) return <Navigate to="/counter" />;
+  if (role === "closer" && !closerPath) return <Navigate to="/closing" />;
 
   const links =
     role === "employee"
       ? [
           ...NAV.filter((item) => item.to === "/counter" || item.to === "/payments" || item.to === "/diary" || item.to === "/note"),
           ...NAV.filter((item) => item.to === "/gpay"),
+          ...NAV.filter((item) => item.to === "/bill"),
         ]
       : role === "closer"
         ? NAV.filter((item) => item.to === "/counter" || item.to === "/closing")
-        : NAV.filter((item) => item.to !== "/payments");
+        : NAV.filter((item) => item.to !== "/payments" && item.to !== "/bill");
 
   return (
     <div className="min-h-dvh bg-bg text-ink">
@@ -338,7 +362,7 @@ export function Shell({ children }: { children: ReactNode }) {
       </div>
 
       <nav className="no-print safe-bottom fixed inset-x-0 bottom-0 z-30 border-t border-line bg-surface md:hidden">
-        <div className={cn("grid", role === "closer" ? "grid-cols-2" : "grid-cols-5")}>
+        <div className={cn("grid", role === "closer" ? "grid-cols-2" : role === "employee" ? "grid-cols-6" : "grid-cols-5")}>
           {(role === "admin" ? links.filter((item) => item.mobile) : links).map((item) => (
             <Link
               key={item.to}

@@ -7,7 +7,7 @@ import { StaffDialog } from "@/components/staff-dialog";
 import { ResultDialog, type Result } from "@/components/result-dialog";
 import { Button } from "@/components/ui/button";
 import { inr, pct } from "@/lib/format";
-import { employeeSplitSum, leaveTally, monthCollection, staffMonthRows, type StaffMonthRow } from "@/lib/ledger/calc";
+import { DESK_LABEL, deskOf, employeeSplitSum, leaveTally, monthCollection, staffMonthRows, type StaffMonthRow } from "@/lib/ledger/calc";
 import { datesInMonth, formatDay, formatMonth, isSunday } from "@/lib/ledger/dates";
 import { useLedger } from "@/lib/ledger/store";
 import type { Employee } from "@/lib/ledger/types";
@@ -214,7 +214,7 @@ function PayCard({
         <div>
           <h2 className="font-display text-2xl leading-tight">{row.employee.name}</h2>
           <p className="text-sm text-muted">
-            {row.employee.role}
+            {DESK_LABEL[deskOf(row.employee)]}
             {row.employee.active ? "" : " · Inactive"}
             {row.pay.lwpDays > 0 ? ` · ${row.pay.lwpDays} unpaid day${row.pay.lwpDays === 1 ? "" : "s"}` : ""}
           </p>
@@ -357,7 +357,7 @@ function SalarySlip({
       <div className="mt-5 flex items-end justify-between gap-3 border-b border-line pb-3">
         <div>
           <p className="font-display text-3xl leading-tight">{row.employee.name}</p>
-          <p className="text-sm text-muted">{row.employee.role}</p>
+          <p className="text-sm text-muted">{DESK_LABEL[deskOf(row.employee)]}</p>
         </div>
         <p className="text-sm text-muted">{partial ? "Up to today" : "Full month"}</p>
       </div>

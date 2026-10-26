@@ -1588,6 +1588,7 @@ function audienceLabel(audience: string, names: Map<string, string>): string {
     .map((part) => {
       if (part === "desk:aadhaar") return "Aadhaar desk";
       if (part === "desk:service") return "Service desk";
+      if (part === "desk:support") return "Support desk";
       if (part.startsWith("staff:")) return names.get(part.slice(6)) ?? "Staff";
       return "";
     })
@@ -1663,7 +1664,7 @@ export const addNotice = createServerFn({ method: "POST" })
   .validator((input: { body: string; to: string[] }) => {
     const text = String(input?.body ?? "").trim().slice(0, 400);
     if (!text) throw new Error("Write the message.");
-    const allowed = new Set(["all", "desk:aadhaar", "desk:service"]);
+    const allowed = new Set(["all", "desk:aadhaar", "desk:service", "desk:support"]);
     const to = [...new Set((input?.to ?? []).map((item) => String(item).trim()).filter((item) => allowed.has(item) || /^staff:[A-Za-z0-9_-]+$/.test(item)))];
     if (to.length === 0) throw new Error("Choose who should get this message.");
     return { body: text, to: to.includes("all") ? ["all"] : to };

@@ -10,6 +10,7 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as BillRouteImport } from './routes/bill'
 import { Route as CentreRouteImport } from './routes/centre'
 import { Route as ClosingRouteImport } from './routes/closing'
 import { Route as CollectionsRouteImport } from './routes/collections'
@@ -30,6 +31,11 @@ import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const BillRoute = BillRouteImport.update({
+  id: '/bill',
+  path: '/bill',
   getParentRoute: () => rootRouteImport,
 } as any)
 const CentreRoute = CentreRouteImport.update({
@@ -115,6 +121,7 @@ const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/bill': typeof BillRoute
   '/centre': typeof CentreRoute
   '/closing': typeof ClosingRoute
   '/collections': typeof CollectionsRoute
@@ -134,6 +141,7 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/bill': typeof BillRoute
   '/centre': typeof CentreRoute
   '/closing': typeof ClosingRoute
   '/collections': typeof CollectionsRoute
@@ -154,6 +162,7 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/bill': typeof BillRoute
   '/centre': typeof CentreRoute
   '/closing': typeof ClosingRoute
   '/collections': typeof CollectionsRoute
@@ -175,6 +184,7 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/bill'
     | '/centre'
     | '/closing'
     | '/collections'
@@ -194,6 +204,7 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/bill'
     | '/centre'
     | '/closing'
     | '/collections'
@@ -213,6 +224,7 @@ export interface FileRouteTypes {
   id:
     | '__root__'
     | '/'
+    | '/bill'
     | '/centre'
     | '/closing'
     | '/collections'
@@ -233,6 +245,7 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  BillRoute: typeof BillRoute
   CentreRoute: typeof CentreRoute
   ClosingRoute: typeof ClosingRoute
   CollectionsRoute: typeof CollectionsRoute
@@ -258,6 +271,13 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/bill': {
+      id: '/bill'
+      path: '/bill'
+      fullPath: '/bill'
+      preLoaderRoute: typeof BillRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/centre': {
@@ -377,6 +397,7 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  BillRoute: BillRoute,
   CentreRoute: CentreRoute,
   ClosingRoute: ClosingRoute,
   CollectionsRoute: CollectionsRoute,

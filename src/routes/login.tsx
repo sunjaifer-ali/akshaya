@@ -76,7 +76,8 @@ function LoginPage() {
         markDeskOpen();
         await recordLogin({ data: { screen: `${window.screen.width}×${window.screen.height}` } }).catch(() => undefined);
       }
-      window.location.assign("/");
+      const home = chosen?.role === "employee" ? "/counter" : chosen?.role === "closer" ? "/closing" : "/";
+      window.location.assign(home);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not sign in.");
     } finally {

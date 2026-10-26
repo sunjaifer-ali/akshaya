@@ -121,6 +121,19 @@
   margin: 14mm;
 }
 
+@page bill {
+  size: A4 portrait;
+  margin: 8mm;
+}
+
+.bill-sheet {
+  width: min(100%, 190mm);
+  min-height: 120mm;
+  border: 1px solid #111;
+  padding: 8mm;
+  color: #111;
+}
+
 @media print {
   html,
   body,
@@ -212,6 +225,27 @@
   .month-note {
     break-after: page;
     page: salary;
+  }
+
+  .bill-sheet {
+    page: bill;
+    width: 194mm;
+    height: 136mm;
+    min-height: 0;
+    margin: 0;
+    break-after: page;
+    page-break-after: always;
+    box-shadow: none;
+  }
+
+  .bill-sheet table {
+    font-size: 13px !important;
+  }
+
+  .bill-sheet img {
+    height: 48px !important;
+    width: auto !important;
+    margin: 0 !important;
   }
 
   .salary-slip:last-child,
