@@ -204,11 +204,11 @@ function DeskPage() {
       </section>
 
       <section className="mt-4 grid gap-4 lg:grid-cols-5">
-        <div className="flex flex-col rounded-xl border border-line bg-surface p-5 lg:col-span-3">
+        <div className="rounded-xl border border-line bg-surface p-5 lg:col-span-3">
           <h2 className="font-display text-2xl">This year, month by month</h2>
-          <div className="print-chart mt-3 h-52">
+          <div className="print-chart relative mt-3 h-52 w-full shrink-0 overflow-hidden">
             {mounted ? (
-              <ResponsiveContainer width="100%" height="100%">
+              <ResponsiveContainer width="100%" height={208}>
                 <BarChart data={points} barCategoryGap={8}>
                   <XAxis dataKey="label" tick={{ fill: chartColors.faint, fontSize: 12 }} axisLine={false} tickLine={false} />
                   <YAxis hide />
@@ -222,7 +222,7 @@ function DeskPage() {
               </ResponsiveContainer>
             ) : null}
           </div>
-          <div className="mt-4 grid flex-1 content-end gap-3 sm:grid-cols-2">
+          <div className="mt-4 grid gap-3 sm:grid-cols-2">
             <Link to="/closing" search={{ d: today || `${month}-01` }} className="rounded-lg border border-line bg-bg p-4 hover:border-line-strong">
               <CardText title="Closing" value={mounted ? closeWord.value : "—"} note="Cash, wallets and bank" />
             </Link>

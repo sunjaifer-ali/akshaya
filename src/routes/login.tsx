@@ -94,7 +94,7 @@ function LoginPage() {
           void submit();
         }}
       >
-        <img src="/akshaya-logo.png" alt="Akshaya" className="mx-auto mb-4 h-auto w-28" />
+        <img src="/akshaya-logo.png" alt="Akshaya" width="112" height="89" className="mx-auto mb-4 h-auto w-28" />
         <p className="text-center text-xs font-semibold tracking-widest text-accent">AKSHAYA</p>
         <h1 className="text-center font-display text-4xl leading-tight">Thrikkadeeri</h1>
         <p className="mt-2 text-center text-sm text-muted">

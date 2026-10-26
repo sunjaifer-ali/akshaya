@@ -28,7 +28,7 @@ import { BackupDialog } from "@/components/backup-dialog";
 import { CentreCredit } from "@/components/centre-credit";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/cn";
-import { authEnabled, deskIsOpen, signOut, watchIdle } from "@/lib/auth/client";
+import { authEnabled, signOut, watchIdle } from "@/lib/auth/client";
 import { RedirectToSignIn, UserButton } from "@/lib/auth/gates";
 import { useCurrentUserState } from "@/lib/auth/use-current-user";
 import { myRole, listNotices, recordLogin, type CentreRole } from "@/lib/centre.functions";
@@ -107,13 +107,7 @@ export function Shell({ children }: { children: ReactNode }) {
   }, [userId, pathname]);
 
   useEffect(() => {
-    if (!authEnabled || !mounted || pathname === "/login" || deskIsOpen()) return;
-    window.location.replace("/login");
-    void signOut("/login").catch(() => undefined);
-  }, [mounted, pathname]);
-
-  useEffect(() => {
-    if (!authEnabled || !mounted || isPending || !userId || !deskIsOpen()) return;
+    if (!authEnabled || !mounted || isPending || !userId) return;
     let stop = () => {};
     let cancelled = false;
     const timer = window.setTimeout(() => {
@@ -231,7 +225,7 @@ export function Shell({ children }: { children: ReactNode }) {
           aria-label={role === "employee" ? "Counter" : role === "closer" ? "Closing" : "Desk"}
           className="block shrink-0 border-b border-line px-4 pb-4 pt-5 text-center"
         >
-          <img src="/akshaya-logo.png" alt="" className="mx-auto h-auto w-16" />
+          <img src="/akshaya-logo.png" alt="" width="64" height="51" className="mx-auto h-auto w-16" />
           <p className="mt-2 font-display text-2xl leading-none text-ink">Thrikkadeeri</p>
           <p className="mt-1 text-xs tracking-wide text-faint">Centre book</p>
           {role === "employee" && user?.displayName ? <p className="mt-2 text-sm font-medium text-accent">{user.displayName}</p> : null}
@@ -293,7 +287,7 @@ export function Shell({ children }: { children: ReactNode }) {
       <div className="print-shell md:pl-56">
         <header className="no-print sticky top-0 z-20 flex items-center justify-between gap-3 border-b border-line bg-bg/95 px-4 py-3 backdrop-blur md:hidden">
           <Link to={role === "employee" ? "/counter" : role === "closer" ? "/closing" : "/"} aria-label={role === "employee" ? "Counter" : role === "closer" ? "Closing" : "Desk"} className="flex min-w-0 items-center gap-2">
-            <img src="/akshaya-logo.png" alt="" className="h-9 w-auto shrink-0" />
+            <img src="/akshaya-logo.png" alt="" width="36" height="29" className="h-9 w-auto shrink-0" />
             <div className="min-w-0">
               <p className="text-xs font-semibold tracking-widest text-accent">AKSHAYA</p>
               <p className="truncate font-display text-lg leading-none">{shortName(centreName)}</p>
