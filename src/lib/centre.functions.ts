@@ -2285,12 +2285,12 @@ export const listBackups = createServerFn({ method: "GET" })
     try {
       const saved = await sql.query<{ id: string }>(
         `insert into centre_backup (id, taken_on, data)
-         select $1, $1::date, jsonb_build_object('kind', 'akshaya-thrikkadeeri-book', 'version', 2, 'book', data)
+         select $1::text, $2::date, jsonb_build_object('kind', 'akshaya-thrikkadeeri-book', 'version', 2, 'book', data)
          from centre_book
          where id = 'centre'
          on conflict (id) do update set data = excluded.data, created_at = now()
          returning id`,
-        [day],
+        [day, day],
       );
       if (saved.length === 0) note = "No book is saved in Neon yet.";
       await sql.query(`delete from centre_backup where taken_on < ($1::date - interval '7 days')`, [day]);
@@ -2356,11 +2356,11 @@ async function keepDailyBackup(
   const day = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(new Date());
   await sql.query(
     `insert into centre_backup (id, taken_on, data)
-     select $1, $1::date, jsonb_build_object('kind', 'akshaya-thrikkadeeri-book', 'version', 2, 'book', data)
+     select $1::text, $2::date, jsonb_build_object('kind', 'akshaya-thrikkadeeri-book', 'version', 2, 'book', data)
      from centre_book
      where id = 'centre'
      on conflict (id) do update set data = excluded.data, created_at = now()`,
-    [day],
+    [day, day],
   );
   await sql.query(`delete from centre_backup where taken_on < ($1::date - interval '7 days')`, [day]);
   await trimStoredRows(sql);
