@@ -21,9 +21,10 @@ export function BackupDialog({ open, onOpenChange }: { open: boolean; onOpenChan
   useEffect(() => {
     if (!open) return;
     void listBackups()
-      .then((rows) => {
+      .then((result) => {
+        const rows = Array.isArray(result) ? result : result.copies;
         setBackups(rows.filter((row) => row.takenOn));
-        setListNote("");
+        setListNote(Array.isArray(result) ? "" : result.note);
       })
       .catch((error: unknown) => {
         setBackups([]);

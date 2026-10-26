@@ -2280,23 +2280,34 @@ export const listBackups = createServerFn({ method: "GET" })
     const { getSql } = await import("@/lib/db");
     const sql = await getSql();
     await ensureBackupTable(sql);
-    const current = await sql<{ data: LedgerData | string }>`select data from centre_book where id = 'centre'`;
-    const stored = current[0] ? asJson(current[0].data) : null;
-    if (stored?.centreName) {
-      try {
-        await keepDailyBackup(sql, stored);
-      } catch {
-        // Still show any copies already saved.
-      }
+    const day = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(new Date());
+    let note = "";
+    try {
+      const saved = await sql.query<{ id: string }>(
+        `insert into centre_backup (id, taken_on, data)
+         select $1, $1::date, jsonb_build_object('kind', 'akshaya-thrikkadeeri-book', 'version', 2, 'book', data)
+         from centre_book
+         where id = 'centre'
+         on conflict (id) do update set data = excluded.data, created_at = now()
+         returning id`,
+        [day],
+      );
+      if (saved.length === 0) note = "No book is saved in Neon yet.";
+      await sql.query(`delete from centre_backup where taken_on < ($1::date - interval '7 days')`, [day]);
+    } catch (error) {
+      note = error instanceof Error ? error.message : "Today's copy was not saved.";
     }
     const rows = await sql<{ id: string; takenOn: string }>`
       select id, to_char(taken_on, 'YYYY-MM-DD') as "takenOn" from centre_backup order by taken_on desc limit 7
     `;
-    return rows.map((row) => {
-      const record = row as { id?: string; takenOn?: string; takenon?: string };
-      const takenOn = String(record.takenOn || record.takenon || record.id || "").slice(0, 10);
-      return { id: String(record.id || takenOn), takenOn };
-    });
+    return {
+      copies: rows.map((row) => {
+        const record = row as { id?: string; takenOn?: string; takenon?: string };
+        const takenOn = String(record.takenOn || record.takenon || record.id || "").slice(0, 10);
+        return { id: String(record.id || takenOn), takenOn };
+      }),
+      note,
+    };
   });
 
 export const restoreBackup = createServerFn({ method: "POST" })
@@ -2339,16 +2350,17 @@ export const restoreBackup = createServerFn({ method: "POST" })
 
 async function keepDailyBackup(
   sql: Awaited<ReturnType<typeof import("@/lib/db").getSql>>,
-  book: LedgerData,
+  _book?: LedgerData,
 ) {
   await ensureBackupTable(sql);
   const day = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(new Date());
-  const payload = { kind: "akshaya-thrikkadeeri-book", version: 2, book };
   await sql.query(
     `insert into centre_backup (id, taken_on, data)
-     values ($1, $1::date, $2::jsonb)
+     select $1, $1::date, jsonb_build_object('kind', 'akshaya-thrikkadeeri-book', 'version', 2, 'book', data)
+     from centre_book
+     where id = 'centre'
      on conflict (id) do update set data = excluded.data, created_at = now()`,
-    [day, JSON.stringify(payload)],
+    [day],
   );
   await sql.query(`delete from centre_backup where taken_on < ($1::date - interval '7 days')`, [day]);
   await trimStoredRows(sql);

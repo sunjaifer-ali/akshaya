@@ -229,12 +229,13 @@
 
   .bill-sheet {
     page: bill;
-    width: 194mm;
+    width: 190mm;
     height: 136mm;
     min-height: 0;
     margin: 0;
-    break-after: page;
-    page-break-after: always;
+    break-after: avoid;
+    page-break-after: avoid;
+    break-inside: avoid;
     box-shadow: none;
   }
 
@@ -242,10 +243,19 @@
     font-size: 13px !important;
   }
 
+  .bill-sheet th,
+  .bill-sheet td {
+    padding: 3px 0 !important;
+  }
+
   .bill-sheet img {
     height: 48px !important;
     width: auto !important;
     margin: 0 !important;
+  }
+
+  main:has(.bill-sheet) > img {
+    display: none !important;
   }
 
   .salary-slip:last-child,

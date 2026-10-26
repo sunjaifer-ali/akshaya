@@ -52,7 +52,7 @@ const NAV = [
   { to: "/centre", label: "Centre", icon: BarChart3, group: "Review", mobile: false },
   { to: "/reports", label: "Reports", icon: ClipboardList, group: "Review", mobile: false },
   { to: "/note", label: "Message", icon: NotebookPen, group: "Review", mobile: false },
-  { to: "/bill", label: "Bill", icon: FileText, group: "Today", mobile: false },
+  { to: "/bill", label: "Bill generation", icon: FileText, group: "Today", mobile: false },
 ] as const;
 
 const GROUPS = ["Today", "Money", "People", "Review"] as const;
@@ -60,7 +60,7 @@ const GROUPS = ["Today", "Money", "People", "Review"] as const;
 const MORE_LABEL: Record<(typeof NAV)[number]["to"], string> = {
   "/": "Desk",
   "/counter": "Live counter",
-  "/bill": "Bill",
+  "/bill": "Bill generation",
   "/gpay": "Personal GPay Payments",
   "/payments": "Payments",
   "/credit": "Credit and advances",

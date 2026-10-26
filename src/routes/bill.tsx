@@ -26,7 +26,7 @@ function BillPage() {
   return (
     <div>
       <section className="no-print mx-auto max-w-lg">
-        <h1 className="font-display text-3xl">Bill</h1>
+        <h1 className="font-display text-3xl">Bill generation</h1>
         <p className="mt-1 text-sm text-muted">Print only. This is not added to the counter or the closing.</p>
         <form
           className="mt-4 grid gap-3"
@@ -65,51 +65,51 @@ function BillPage() {
       </section>
 
       {ready ? (
-        <article className="bill-sheet mx-auto mt-6 bg-white text-black">
-          <header className="flex items-center gap-3 border-b border-black pb-3">
-            <img src="/akshaya-logo.png" alt="" className="h-14 w-auto" />
+        <article className="bill-sheet mx-auto mt-6 bg-white font-sans text-[13px] leading-snug text-black">
+          <div className="flex items-center gap-3 border-b border-black pb-2">
+            <img src="/akshaya-logo.png" alt="" width="48" height="38" className="h-12 w-auto" />
             <div className="min-w-0 flex-1 text-center">
-              <p className="text-[11px] font-semibold tracking-[0.18em]">AKSHAYA</p>
-              <h2 className="font-display text-xl leading-tight">AKSHAYA COMMON SERVICE CENTRE</h2>
-              <p className="mt-1 text-[11px] leading-snug">CITY CENTRE COMPLEX, THRIKKADEERI, PALAKKAD-679502</p>
+              <p className="text-[10px] font-semibold tracking-[0.16em]">AKSHAYA</p>
+              <p className="text-sm font-semibold leading-tight">AKSHAYA COMMON SERVICE CENTRE</p>
+              <p className="mt-0.5 text-[11px] leading-snug">CITY CENTRE COMPLEX, THRIKKADEERI, PALAKKAD-679502</p>
               <p className="text-[11px]">E-mail akspkd209@gmail.com · Mob 9495663369</p>
             </div>
-          </header>
-          <div className="mt-3 flex items-end justify-between gap-4 text-sm">
+          </div>
+          <div className="mt-3 flex items-start justify-between gap-4">
             <p className="font-semibold tracking-wide">SERVICE BILL</p>
             <p>Date {showDate(date)}</p>
           </div>
-          <p className="mt-3 text-sm">Customer <span className="font-medium">{customer.trim()}</span></p>
-          <p className="mt-1 text-sm">Service <span className="font-medium">{service.trim()}</span></p>
-          <table className="mt-3 w-full text-sm">
+          <p className="mt-2">Customer {customer.trim()}</p>
+          <p className="mt-1">Service {service.trim()}</p>
+          <table className="mt-3 w-full border-collapse">
             <thead>
               <tr className="border-y border-black">
-                <th className="py-1.5 text-left font-medium">Particulars</th>
-                <th className="py-1.5 text-right font-medium">Amount</th>
+                <th className="py-1 text-left font-medium">Particulars</th>
+                <th className="py-1 text-right font-medium">Amount</th>
               </tr>
             </thead>
             <tbody>
               <tr>
-                <td className="py-1.5">Departmental pay</td>
-                <td className="py-1.5 text-right tabular-nums">{inr(departmentPay)}</td>
+                <td className="py-1">Departmental pay</td>
+                <td className="py-1 text-right tabular-nums">{inr(departmentPay)}</td>
               </tr>
               <tr>
-                <td className="py-1.5">Service charge</td>
-                <td className="py-1.5 text-right tabular-nums">{inr(serviceCharge)}</td>
+                <td className="py-1">Service charge</td>
+                <td className="py-1 text-right tabular-nums">{inr(serviceCharge)}</td>
               </tr>
             </tbody>
             <tfoot>
-              <tr className="border-t border-black">
-                <th className="py-2 text-left text-base">Total</th>
-                <th className="py-2 text-right text-base tabular-nums">{inr(total)}</th>
+              <tr className="border-t border-black font-semibold">
+                <td className="py-1.5">Total</td>
+                <td className="py-1.5 text-right tabular-nums">{inr(total)}</td>
               </tr>
             </tfoot>
           </table>
           <p className="mt-2 text-xs">{rupeesInWords(total)}</p>
-          <footer className="mt-8 flex items-end justify-between text-xs">
+          <div className="mt-8 flex items-end justify-between text-xs">
             <p>{staff ? `Prepared by ${staff}` : ""}</p>
-            <p className="text-right">Authorised signature</p>
-          </footer>
+            <p>Authorised signature</p>
+          </div>
         </article>
       ) : null}
     </div>
