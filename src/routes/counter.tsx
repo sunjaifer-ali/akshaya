@@ -31,6 +31,8 @@ function CounterPage() {
   const [amount, setAmount] = useState("");
   const [personalGpay, setPersonalGpay] = useState(false);
   const [department, setDepartment] = useState("");
+  const [payMode, setPayMode] = useState<"cash" | "gpay" | "mixed">("cash");
+  const [cashPart, setCashPart] = useState("");
   const [askGpay, setAskGpay] = useState(false);
   const [notice, setNotice] = useState("");
   const [result, setResult] = useState<Result | null>(null);
@@ -78,6 +80,8 @@ function CounterPage() {
         personalGpay,
         department: personalGpay ? Number(department || 0) : 0,
         bankDepartment: 0,
+        payMode,
+        cashPart: payMode === "mixed" ? Number(cashPart || 0) : 0,
       },
     })
       .then(() => {
@@ -87,6 +91,8 @@ function CounterPage() {
         setAmount("");
         setPersonalGpay(false);
         setDepartment("");
+        setPayMode("cash");
+        setCashPart("");
         setNotice("");
         setEditing(null);
         setResult({ ok: true, message: "Charge successfully saved." });
@@ -106,6 +112,13 @@ function CounterPage() {
   const gpayTotal = gpayLines.reduce((sum, line) => sum + line.amount + (line.department || 0), 0);
   const gpayService = gpayLines.reduce((sum, line) => sum + line.amount, 0);
   const gpayDepartment = gpayLines.reduce((sum, line) => sum + (line.department || 0), 0);
+  let cashIn = 0;
+  let gpayIn = 0;
+  for (const line of lines) {
+    const part = received(line);
+    cashIn += part.cash;
+    gpayIn += part.gpay;
+  }
 
   return (
     <div>
@@ -131,12 +144,14 @@ function CounterPage() {
         <section className="rounded-xl border border-line bg-surface p-5">
           <p className="text-xs font-semibold tracking-widest text-faint">YOUR TOTAL TODAY</p>
           <p className="mt-1 font-display text-5xl tabular-nums">{inr(total)}</p>
+          <p className="mt-2 text-base tabular-nums">Cash {inr(cashIn)} · GPay {inr(gpayIn)}</p>
         </section>
       ) : (
         <section className="grid gap-3 sm:grid-cols-2">
           <div className="rounded-xl border border-line bg-surface p-5">
             <p className="text-xs font-semibold tracking-widest text-faint">{day === today ? "ENTERED TODAY" : "ENTERED"}</p>
             <p className="mt-1 font-display text-5xl tabular-nums">{inr(total)}</p>
+            <p className="mt-2 text-base tabular-nums">Cash {inr(cashIn)} · GPay {inr(gpayIn)}</p>
           </div>
           <div className="rounded-xl border border-line bg-surface p-5">
             <p className="text-xs font-semibold tracking-widest text-faint">CUSTOMERS</p>
@@ -176,7 +191,7 @@ function CounterPage() {
         </section>
       ) : panel === "live" && (role === "employee" || (role === "admin" && day === today)) ? (
         <form
-          className="mt-4 grid gap-3 rounded-xl border border-line bg-surface p-5 sm:grid-cols-2"
+          className="mt-4 grid gap-2 rounded-xl border border-line bg-surface p-4 sm:grid-cols-2"
           onSubmit={(event) => {
             event.preventDefault();
             save();
@@ -186,7 +201,7 @@ function CounterPage() {
             <span className="mb-1 block font-medium text-ink">Service</span>
             <input
               list="akshaya-services"
-              className="h-12 w-full rounded-sm border border-line bg-bg px-3 text-base outline-none focus:border-accent"
+              className="h-11 w-full rounded-sm border border-line bg-bg px-3 text-base outline-none focus:border-accent"
               value={service}
               onChange={(event) => setService(event.target.value)}
             />
@@ -199,7 +214,7 @@ function CounterPage() {
           <label className="block text-sm">
             <span className="mb-1 block font-medium text-ink">Customer name</span>
             <input
-              className="h-12 w-full rounded-sm border border-line bg-bg px-3 text-base outline-none focus:border-accent"
+              className="h-11 w-full rounded-sm border border-line bg-bg px-3 text-base outline-none focus:border-accent"
               value={customer}
               onChange={(event) => setCustomer(event.target.value)}
             />
@@ -208,7 +223,7 @@ function CounterPage() {
             <span className="mb-1 block font-medium text-ink">Mobile, if any</span>
             <input
               inputMode="numeric"
-              className="h-12 w-full rounded-sm border border-line bg-bg px-3 text-base outline-none focus:border-accent"
+              className="h-11 w-full rounded-sm border border-line bg-bg px-3 text-base outline-none focus:border-accent"
               value={mobile}
               onChange={(event) => setMobile(event.target.value)}
             />
@@ -217,18 +232,43 @@ function CounterPage() {
             <span className="mb-1 block font-medium text-ink">Service charge</span>
             <input
               inputMode="numeric"
-              className="h-12 w-full rounded-sm border border-line bg-bg px-3 text-base outline-none focus:border-accent"
+              className="h-11 w-full rounded-sm border border-line bg-bg px-3 text-base outline-none focus:border-accent"
               value={amount}
               onChange={(event) => setAmount(event.target.value)}
             />
           </label>
+          <div className="sm:col-span-2">
+            <PayModeButtons
+              mode={personalGpay ? "gpay" : payMode}
+              onChange={(mode) => {
+                setPayMode(mode);
+                if (mode !== "gpay") {
+                  setPersonalGpay(false);
+                  setDepartment("");
+                }
+              }}
+            />
+            {payMode === "mixed" && !personalGpay ? (
+              <label className="mt-2 block text-sm">
+                <span className="mb-1 block text-muted">Cash received. The rest is GPay.</span>
+                <input
+                  inputMode="numeric"
+                  className="h-11 w-full rounded-sm border border-line bg-bg px-3 text-base outline-none focus:border-accent sm:max-w-xs"
+                  value={cashPart}
+                  onChange={(event) => setCashPart(event.target.value.replace(/[^\d]/g, "").slice(0, 7))}
+                />
+              </label>
+            ) : null}
+          </div>
           <label className="flex min-h-11 items-center gap-2 text-sm sm:col-span-2">
             <input
               type="checkbox"
               checked={personalGpay}
               onChange={(event) => {
-                if (event.target.checked) setAskGpay(true);
-                else {
+                if (event.target.checked) {
+                  setPayMode("gpay");
+                  setAskGpay(true);
+                } else {
                   setPersonalGpay(false);
                   setDepartment("");
                 }
@@ -343,6 +383,40 @@ function CounterPage() {
   );
 }
 
+function received(line: ServiceLine): { cash: number; gpay: number } {
+  if (line.personalGpay || line.payMode === "gpay") return { cash: 0, gpay: line.amount };
+  if (line.payMode === "mixed") {
+    const cash = Math.min(line.amount, Math.max(0, Number(line.cashPart) || 0));
+    return { cash, gpay: line.amount - cash };
+  }
+  return { cash: line.amount, gpay: 0 };
+}
+
+function modeWord(line: ServiceLine): string {
+  if (line.personalGpay) return "GPay";
+  if (line.payMode === "gpay") return "GPay";
+  if (line.payMode === "mixed") return `Mixed, cash ${inr(received(line).cash)}`;
+  return "Cash";
+}
+
+function PayModeButtons({ mode, onChange }: { mode: "cash" | "gpay" | "mixed"; onChange: (mode: "cash" | "gpay" | "mixed") => void }) {
+  return (
+    <div className="grid grid-cols-3 gap-2">
+      {(
+        [
+          ["cash", "Cash"],
+          ["gpay", "GPay"],
+          ["mixed", "Mixed"],
+        ] as const
+      ).map(([id, label]) => (
+        <Button key={id} type="button" className="min-h-11" variant={mode === id ? "primary" : "secondary"} onClick={() => onChange(id)}>
+          {label}
+        </Button>
+      ))}
+    </div>
+  );
+}
+
 function CustomerLines({
   lines,
   editing,
@@ -371,6 +445,7 @@ function CustomerLines({
                 <p className="text-xs text-faint">
                   {line.service}
                   {line.mobile ? ` · ${line.mobile}` : ""}
+                  {` · ${modeWord(line)}`}
                   {line.personalGpay
                     ? ` · Personal GPay · total ${inr(line.amount + (line.department || 0))} · service ${inr(line.amount)} · department ${inr(line.department || 0)}`
                     : ""}
@@ -412,6 +487,8 @@ function EditCharge({ line, onClose, onResult }: { line: ServiceLine; onClose: (
   const [amount, setAmount] = useState(String(line.amount));
   const [personalGpay, setPersonalGpay] = useState(Boolean(line.personalGpay));
   const [department, setDepartment] = useState(line.department ? String(line.department) : "");
+  const [payMode, setPayMode] = useState<"cash" | "gpay" | "mixed">(line.personalGpay ? "gpay" : line.payMode === "mixed" || line.payMode === "gpay" ? line.payMode : "cash");
+  const [cashPart, setCashPart] = useState(line.payMode === "mixed" && line.cashPart ? String(line.cashPart) : "");
   const [askGpay, setAskGpay] = useState(false);
   const [pending, setPending] = useState(false);
   return (
@@ -431,6 +508,8 @@ function EditCharge({ line, onClose, onResult }: { line: ServiceLine; onClose: (
               personalGpay,
               department: personalGpay ? Number(department || 0) : 0,
               bankDepartment: line.bankDepartment || 0,
+              payMode,
+              cashPart: payMode === "mixed" ? Number(cashPart || 0) : 0,
             },
           })
             .then(() => onResult({ ok: true, message: "Charge successfully updated." }))
@@ -444,13 +523,39 @@ function EditCharge({ line, onClose, onResult }: { line: ServiceLine; onClose: (
         <input className="h-11 rounded-sm border border-line bg-bg px-3 text-base outline-none focus:border-accent" value={customer} onChange={(event) => setCustomer(event.target.value)} aria-label="Customer" />
         <input className="h-11 rounded-sm border border-line bg-bg px-3 text-base outline-none focus:border-accent" value={mobile} onChange={(event) => setMobile(event.target.value)} aria-label="Mobile" />
         <input className="h-11 rounded-sm border border-line bg-bg px-3 text-base outline-none focus:border-accent" value={amount} onChange={(event) => setAmount(event.target.value)} aria-label="Service charge" inputMode="numeric" />
+        <div className="sm:col-span-2">
+          <PayModeButtons
+            mode={personalGpay ? "gpay" : payMode}
+            onChange={(mode) => {
+              setPayMode(mode);
+              if (mode !== "gpay") {
+                setPersonalGpay(false);
+                setDepartment("");
+              }
+            }}
+          />
+          {payMode === "mixed" && !personalGpay ? (
+            <label className="mt-2 block text-sm">
+              <span className="mb-1 block text-muted">Cash received. The rest is GPay.</span>
+              <input
+                inputMode="numeric"
+                aria-label="Cash received"
+                className="h-11 w-full rounded-sm border border-line bg-bg px-3 text-base outline-none focus:border-accent sm:max-w-xs"
+                value={cashPart}
+                onChange={(event) => setCashPart(event.target.value.replace(/[^\d]/g, "").slice(0, 7))}
+              />
+            </label>
+          ) : null}
+        </div>
         <label className="flex min-h-11 items-center gap-2 text-sm sm:col-span-2">
           <input
             type="checkbox"
             checked={personalGpay}
             onChange={(event) => {
-              if (event.target.checked) setAskGpay(true);
-              else {
+              if (event.target.checked) {
+                setPayMode("gpay");
+                setAskGpay(true);
+              } else {
                 setPersonalGpay(false);
                 setDepartment("");
               }

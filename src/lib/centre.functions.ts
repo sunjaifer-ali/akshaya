@@ -289,6 +289,32 @@ function departmentFee(personal: boolean, value: unknown): number {
   return amount;
 }
 
+function paySplit(amount: number, mode: unknown, cashPart: unknown, personalGpay: boolean): { payMode: "cash" | "gpay" | "mixed"; cashPart: number } {
+  if (personalGpay || mode === "gpay") return { payMode: "gpay", cashPart: 0 };
+  if (mode === "mixed") {
+    const cash = Math.round(Number(cashPart));
+    if (!Number.isFinite(cash) || cash <= 0 || cash >= amount) throw new Error("For mixed, enter the cash. It must be less than the service charge.");
+    return { payMode: "mixed", cashPart: cash };
+  }
+  return { payMode: "cash", cashPart: amount };
+}
+
+function shapeServiceLine(line: ServiceLine): ServiceLine {
+  const amount = Number(line.amount);
+  const payMode = line.payMode === "gpay" || line.payMode === "mixed" || line.payMode === "cash" ? line.payMode : "";
+  const raw = line.cashPart as number | string | null | undefined;
+  const cashPart = raw == null || raw === "" ? null : Number(raw);
+  return {
+    ...line,
+    amount,
+    personalGpay: Boolean(line.personalGpay),
+    department: Number(line.department) || 0,
+    bankDepartment: Number(line.bankDepartment) || 0,
+    payMode,
+    cashPart: Number.isFinite(cashPart as number) ? cashPart : null,
+  };
+}
+
 export type OpenCredit = { customer: string; mobile: string; staff: string; balance: number; date: string };
 
 export const addCustomerMove = createServerFn({ method: "POST" })
@@ -1429,11 +1455,13 @@ export type ServiceLine = {
   personalGpay: boolean;
   department: number;
   bankDepartment: number;
+  payMode: "" | "cash" | "gpay" | "mixed";
+  cashPart: number | null;
 };
 
 export const addServiceEntry = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
-  .validator((input: { service: string; customer: string; mobile: string; amount: number; personalGpay?: boolean; department?: number; bankDepartment?: number }) => {
+  .validator((input: { service: string; customer: string; mobile: string; amount: number; personalGpay?: boolean; department?: number; bankDepartment?: number; payMode?: string; cashPart?: number }) => {
     const service = input.service.trim().slice(0, 60);
     const customer = input.customer.trim().slice(0, 80);
     const mobile = optionalMobile(input.mobile);
@@ -1444,7 +1472,8 @@ export const addServiceEntry = createServerFn({ method: "POST" })
     if (!service) throw new Error("Enter the service.");
     if (!customer) throw new Error("Enter the customer name.");
     if (!Number.isFinite(amount) || amount <= 0 || amount > 100000) throw new Error("Enter the service charge.");
-    return { service, customer, mobile, amount, personalGpay, department, bankDepartment };
+    const split = paySplit(amount, input.payMode, input.cashPart, personalGpay);
+    return { service, customer, mobile, amount, personalGpay, department, bankDepartment, ...split };
   })
   .handler(async ({ context, data }) => {
     await requireMember(context.userId);
@@ -1459,8 +1488,8 @@ export const addServiceEntry = createServerFn({ method: "POST" })
       const member = await sql<{ name: string }>`select name from centre_member where user_id = ${context.userId}`;
       const staff = (member[0]?.name || "Staff").trim().slice(0, 80);
       const id = crypto.randomUUID();
-      await sql`insert into service_entry (id, taken_on, user_id, staff_name, service, customer, mobile, amount, personal_gpay, department, bank_department)
-        values (${id}, ${date}, ${context.userId}, ${staff}, ${data.service}, ${data.customer}, ${data.mobile}, ${data.amount}, ${data.personalGpay}, ${data.department}, ${data.bankDepartment})`;
+      await sql`insert into service_entry (id, taken_on, user_id, staff_name, service, customer, mobile, amount, personal_gpay, department, bank_department, pay_mode, cash_part)
+        values (${id}, ${date}, ${context.userId}, ${staff}, ${data.service}, ${data.customer}, ${data.mobile}, ${data.amount}, ${data.personalGpay}, ${data.department}, ${data.bankDepartment}, ${data.payMode}, ${data.cashPart})`;
       await rollCounterDay(sql, date);
       const mine = await sql<{ total: number }>`
         select coalesce(sum(amount), 0)::int as total from service_entry
@@ -1709,22 +1738,22 @@ export const serviceDay = createServerFn({ method: "GET" })
     const closed = await dayIsClosed(sql, date);
     if (role === "employee") {
       const rows = await sql<ServiceLine>`
-        select id, staff_name as staff, service, customer, mobile, amount, personal_gpay as "personalGpay", department, bank_department as "bankDepartment"
+        select id, staff_name as staff, service, customer, mobile, amount, personal_gpay as "personalGpay", department, bank_department as "bankDepartment", pay_mode as "payMode", cash_part as "cashPart"
         from service_entry where taken_on = ${date} and user_id = ${context.userId}
         order by created_at desc`;
-      const lines = rows.map((line) => ({ ...line, amount: Number(line.amount), personalGpay: Boolean(line.personalGpay), department: Number(line.department) || 0, bankDepartment: Number(line.bankDepartment) || 0 }));
+      const lines = rows.map(shapeServiceLine);
       return { role, total: lines.reduce((sum, line) => sum + line.amount, 0), lines, closed };
     }
     await withTransaction(async (tx) => {
       await rollCounterDay(tx, date);
     });
     const lines = await sql<ServiceLine>`
-      select id, staff_name as staff, service, customer, mobile, amount, personal_gpay as "personalGpay", department, bank_department as "bankDepartment"
+      select id, staff_name as staff, service, customer, mobile, amount, personal_gpay as "personalGpay", department, bank_department as "bankDepartment", pay_mode as "payMode", cash_part as "cashPart"
       from service_entry where taken_on = ${date} order by created_at desc`;
     return {
       role,
       total: lines.reduce((sum, line) => sum + Number(line.amount), 0),
-      lines: lines.map((line) => ({ ...line, amount: Number(line.amount), personalGpay: Boolean(line.personalGpay), department: Number(line.department) || 0, bankDepartment: Number(line.bankDepartment) || 0 })),
+      lines: lines.map(shapeServiceLine),
       closed,
     };
   });
@@ -1748,7 +1777,7 @@ export const removeServiceEntry = createServerFn({ method: "POST" })
 
 export const updateServiceEntry = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
-  .validator((input: { id: string; service: string; customer: string; mobile: string; amount: number; personalGpay?: boolean; department?: number; bankDepartment?: number }) => {
+  .validator((input: { id: string; service: string; customer: string; mobile: string; amount: number; personalGpay?: boolean; department?: number; bankDepartment?: number; payMode?: string; cashPart?: number }) => {
     const id = input.id.trim();
     const service = input.service.trim().slice(0, 60);
     const customer = input.customer.trim().slice(0, 80);
@@ -1761,7 +1790,8 @@ export const updateServiceEntry = createServerFn({ method: "POST" })
     if (!service) throw new Error("Enter the service.");
     if (!customer) throw new Error("Enter the customer name.");
     if (!Number.isFinite(amount) || amount <= 0 || amount > 100000) throw new Error("Enter the service charge.");
-    return { id, service, customer, mobile, amount, personalGpay, department, bankDepartment };
+    const split = paySplit(amount, input.payMode, input.cashPart, personalGpay);
+    return { id, service, customer, mobile, amount, personalGpay, department, bankDepartment, ...split };
   })
   .handler(async ({ context, data }) => {
     const role = await requireMember(context.userId);
@@ -1780,7 +1810,7 @@ export const updateServiceEntry = createServerFn({ method: "POST" })
       await ensureAdvanceTable(sql);
       const linked = await sql<{ id: string }>`select id from customer_advance where used_entry_id = ${data.id}`;
       if (linked[0] && data.personalGpay) throw new Error("This charge was paid in advance. It is already in the centre, not a personal GPay.");
-      await sql`update service_entry set service = ${data.service}, customer = ${data.customer}, mobile = ${data.mobile}, amount = ${data.amount}, personal_gpay = ${data.personalGpay}, department = ${data.department}, bank_department = ${data.bankDepartment} where id = ${data.id}`;
+      await sql`update service_entry set service = ${data.service}, customer = ${data.customer}, mobile = ${data.mobile}, amount = ${data.amount}, personal_gpay = ${data.personalGpay}, department = ${data.department}, bank_department = ${data.bankDepartment}, pay_mode = ${data.payMode}, cash_part = ${data.cashPart} where id = ${data.id}`;
       await sql`update customer_advance set service = ${data.service}, customer = ${data.customer}, mobile = ${data.mobile}, amount = ${data.amount} where used_entry_id = ${data.id}`;
       await rollCounterDay(sql, row.taken_on.slice(0, 10));
       await stampAdvanceHeld(sql);
@@ -2101,6 +2131,8 @@ async function ensureServiceTable(sql: Awaited<ReturnType<typeof import("@/lib/d
   await sql.query(`alter table service_entry add column if not exists personal_gpay boolean not null default false`);
   await sql.query(`alter table service_entry add column if not exists department integer not null default 0`);
   await sql.query(`alter table service_entry add column if not exists bank_department integer not null default 0`);
+  await sql.query(`alter table service_entry add column if not exists pay_mode text not null default ''`);
+  await sql.query(`alter table service_entry add column if not exists cash_part integer`);
   await sql.query(`create index if not exists service_entry_taken_on on service_entry (taken_on)`);
 }
 
@@ -2514,7 +2546,9 @@ async function readArchiveRecords(sql: SqlClient) {
     personal_gpay: boolean;
     department: number;
     bank_department: number;
-  }>`select id, taken_on::text as taken_on, user_id, staff_name, service, customer, mobile, amount, personal_gpay, department, bank_department from service_entry order by created_at`;
+    pay_mode: string;
+    cash_part: number | null;
+  }>`select id, taken_on::text as taken_on, user_id, staff_name, service, customer, mobile, amount, personal_gpay, department, bank_department, pay_mode, cash_part from service_entry order by created_at`;
   const credits = await sql<{
     id: string;
     taken_on: string;
@@ -2560,6 +2594,8 @@ async function readArchiveRecords(sql: SqlClient) {
       personalGpay: Boolean(row.personal_gpay),
       department: Number(row.department) || 0,
       bankDepartment: Number(row.bank_department) || 0,
+      payMode: row.pay_mode === "gpay" || row.pay_mode === "mixed" || row.pay_mode === "cash" ? row.pay_mode : "",
+      cashPart: row.cash_part == null ? null : Number(row.cash_part),
     })),
     credits: credits.map((row) => ({
       id: row.id,
@@ -2604,8 +2640,10 @@ async function replaceServices(sql: SqlClient, rows: unknown[], fallbackUser: st
     const date = isoDay(row.date);
     const amount = rupees(row.amount);
     if (!id || !date || amount <= 0) continue;
-    await sql`insert into service_entry (id, taken_on, user_id, staff_name, service, customer, mobile, amount, personal_gpay, department, bank_department)
-      values (${id}, ${date}, ${clip(row.userId, 80) || fallbackUser}, ${clip(row.staff, 80) || "Staff"}, ${clip(row.service, 60)}, ${clip(row.customer, 80)}, ${clip(row.mobile, 15)}, ${amount}, ${Boolean(row.personalGpay)}, ${rupees(row.department)}, ${rupees(row.bankDepartment)})
+    const mode = row.payMode === "gpay" || row.payMode === "mixed" || row.payMode === "cash" ? row.payMode : "";
+    const cashPart = row.cashPart == null || row.cashPart === "" ? null : rupees(row.cashPart);
+    await sql`insert into service_entry (id, taken_on, user_id, staff_name, service, customer, mobile, amount, personal_gpay, department, bank_department, pay_mode, cash_part)
+      values (${id}, ${date}, ${clip(row.userId, 80) || fallbackUser}, ${clip(row.staff, 80) || "Staff"}, ${clip(row.service, 60)}, ${clip(row.customer, 80)}, ${clip(row.mobile, 15)}, ${amount}, ${Boolean(row.personalGpay)}, ${rupees(row.department)}, ${rupees(row.bankDepartment)}, ${mode}, ${cashPart})
       on conflict (id) do nothing`;
   }
 }
