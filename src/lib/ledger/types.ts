@@ -66,6 +66,8 @@ export type CashClose = {
   advanceIn?: number;
   profitTaken?: number;
   profitNote?: string;
+  cashIn?: number;
+  cashInNote?: string;
   creditSeparate?: boolean;
   personalBalance?: number;
 };
@@ -100,6 +102,31 @@ export function payoutKind(text: string): string {
   return "other";
 }
 
+export type ExpenseLine = {
+  id: string;
+  month: string;
+  name: string;
+  category: string;
+  amount: number;
+};
+
+export const EXPENSE_KINDS = [
+  { id: "general", label: "General" },
+  { id: "maintenance", label: "Maintenance" },
+  { id: "accessories", label: "Accessories" },
+  { id: "stationery", label: "Stationery" },
+  { id: "others", label: "Others" },
+  { id: "self", label: "Self expenses" },
+] as const;
+
+export function expenseKindLabel(category: string): string {
+  return EXPENSE_KINDS.find((item) => item.id === category)?.label ?? "Others";
+}
+
+export function isSelfExpense(category: string): boolean {
+  return category === "self";
+}
+
 export type LeaveMark = {
   employeeId: string;
   date: string;
@@ -129,6 +156,7 @@ export type LedgerData = {
   days: CollectionDay[];
   categories: ExpenseCategory[];
   expenses: Record<string, Record<string, number>>;
+  expenseLines: ExpenseLine[];
   leaves: LeaveMark[];
   holidays: string[];
   perfOverrides: PerfOverride[];

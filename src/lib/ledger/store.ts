@@ -7,6 +7,7 @@ import type {
   CollectionDay,
   Employee,
   ExpenseCategory,
+  ExpenseLine,
   LeaveCode,
   LeaveMark,
   LedgerData,
@@ -39,6 +40,9 @@ type LedgerState = LedgerData & {
   renameCategory: (id: string, name: string) => void;
   removeCategory: (id: string) => void;
   copyExpenses: (from: string, to: string) => void;
+  addExpenseLine: (line: ExpenseLine) => void;
+  updateExpenseLine: (line: ExpenseLine) => void;
+  removeExpenseLine: (id: string) => void;
   setLeave: (employeeId: string, date: string, code: LeaveCode | null) => void;
   toggleHoliday: (date: string) => void;
   setPerformance: (employeeId: string, month: string, amount: number) => void;
@@ -257,6 +261,24 @@ export const useLedger = create<LedgerState>()(
             ...state.expenses,
             [to]: { ...(state.expenses[from] ?? {}) },
           },
+          expenseLines: [
+            ...(state.expenseLines ?? []).filter((line) => line.month !== to),
+            ...(state.expenseLines ?? [])
+              .filter((line) => line.month === from)
+              .map((line) => ({ ...line, id: crypto.randomUUID(), month: to })),
+          ],
+        })),
+      addExpenseLine: (line) =>
+        set((state) => ({
+          expenseLines: [...(state.expenseLines ?? []).filter((item) => item.id !== line.id), line],
+        })),
+      updateExpenseLine: (line) =>
+        set((state) => ({
+          expenseLines: (state.expenseLines ?? []).map((item) => (item.id === line.id ? line : item)),
+        })),
+      removeExpenseLine: (id) =>
+        set((state) => ({
+          expenseLines: (state.expenseLines ?? []).filter((item) => item.id !== id),
         })),
       setLeave: (employeeId, date, code) =>
         set((state) => {
@@ -327,6 +349,8 @@ export const useLedger = create<LedgerState>()(
             ...(typeof close.advanceIn === "number" ? { advanceIn: rupee(close.advanceIn) } : {}),
             profitTaken: rupee(close.profitTaken ?? 0),
             profitNote: (close.profitNote ?? "").trim().slice(0, 80),
+            cashIn: rupee(close.cashIn ?? 0),
+            cashInNote: (close.cashInNote ?? "").trim().slice(0, 80),
             creditSeparate: Boolean(close.creditSeparate),
             ...(typeof close.personalBalance === "number" ? { personalBalance: rupee(close.personalBalance) } : {}),
           };
@@ -355,6 +379,7 @@ export const useLedger = create<LedgerState>()(
         const book = persisted as LedgerData;
         if (!Array.isArray(book.cashCloses)) book.cashCloses = [];
         book.salaryPaid = book.salaryPaid ?? [];
+        book.expenseLines = book.expenseLines ?? [];
         book.cashCloses = book.cashCloses.map((row) => ({
           ...row,
           creditPaid: row.creditPaid ?? [],
@@ -365,6 +390,8 @@ export const useLedger = create<LedgerState>()(
           advanceServed: row.advanceServed ?? 0,
           profitTaken: row.profitTaken ?? 0,
           profitNote: row.profitNote ?? "",
+          cashIn: row.cashIn ?? 0,
+          cashInNote: row.cashInNote ?? "",
         }));
         return book;
       },
@@ -377,6 +404,7 @@ export const useLedger = create<LedgerState>()(
         days: state.days,
         categories: state.categories,
         expenses: state.expenses,
+        expenseLines: state.expenseLines ?? [],
         leaves: state.leaves,
         holidays: state.holidays,
         perfOverrides: state.perfOverrides,

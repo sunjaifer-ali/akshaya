@@ -128,7 +128,7 @@ function ClosingPage() {
   });
   const check = checkClose(row, previewCloses, daysForClose, book.holidays, payouts);
   const lined = book.cashCloses.map((item) => {
-    if (item.date === date) return { ...item, creditSeparate: separate, profitTaken: row.profitTaken, profitNote: row.profitNote, advanceHeld: row.advanceHeld, advanceServed: row.advanceServed };
+    if (item.date === date) return { ...item, creditSeparate: separate, profitTaken: row.profitTaken, profitNote: row.profitNote, cashIn: row.cashIn, cashInNote: row.cashInNote, advanceHeld: row.advanceHeld, advanceServed: row.advanceServed };
     if (liveAdvance?.tracked && liveAdvance.lastDate && item.date === liveAdvance.lastDate) return { ...item, advanceHeld: liveAdvance.lastHeld };
     return item;
   });
@@ -237,6 +237,43 @@ function ClosingPage() {
         }}
         locked={locked}
       />
+
+      {role === "admin" ? (
+        <section className="mx-auto mt-3 max-w-lg rounded-xl border border-line bg-surface p-4">
+          <h2 className="font-medium">Cash in</h2>
+          <p className="mt-1 text-sm text-muted">Money you add to Akshaya from your own bank. Enter it here and in the bank or cash count. It is not income.</p>
+          <div className="mt-3 grid gap-3 sm:grid-cols-2">
+            <Field label="Amount added">
+              <MoneyField label="Amount added" value={row.cashIn ?? 0} disabled={locked} onChange={(amount) => patch({ cashIn: amount ?? 0 })} />
+            </Field>
+            <label className="block text-sm">
+              <span className="mb-1 block text-muted">From</span>
+              <input
+                className="h-11 w-full rounded-sm border border-line bg-bg px-3 text-base outline-none focus:border-accent disabled:opacity-70"
+                value={row.cashInNote ?? ""}
+                disabled={locked}
+                placeholder="Own bank"
+                onChange={(event) => patch({ cashInNote: event.target.value.slice(0, 80) })}
+              />
+            </label>
+          </div>
+          {locked ? null : (
+            <Button
+              className="no-print mt-3"
+              onClick={() => {
+                const next = { ...row, date, countedBy: row.countedBy || user?.displayName?.trim() || "Admin" };
+                book.setCashClose(next);
+                setResult({ ok: true, message: "Cash in saved." });
+                void pushClose(date, next).catch((error: unknown) => {
+                  setResult({ ok: false, message: error instanceof Error ? error.message : "Saved on this browser, but not shared." });
+                });
+              }}
+            >
+              Save
+            </Button>
+          )}
+        </section>
+      ) : null}
 
       {role === "admin" ? (
         <section className="mx-auto mt-3 max-w-lg rounded-xl border border-line bg-surface p-4">
@@ -433,6 +470,7 @@ function CheckCard({
         {paid > 0 ? <Pair label="Credit repaid, not an excess" value={`+${inr(paid)}`} /> : null}
         {check.advanceIn > 0 ? <Pair label="Advance received, not an excess" value={`+${inr(check.advanceIn)}`} /> : null}
         {check.advanceServed > 0 ? <Pair label="Advance served, not a shortage" value={`−${inr(check.advanceServed)}`} /> : null}
+        {check.cashIn > 0 ? <Pair label="Cash in, own bank, not income" value={`+${inr(check.cashIn)}`} /> : null}
         {check.paidOut > 0 ? <Pair label="Expenses" value={`−${inr(check.paidOut)}`} /> : null}
         {check.profitTaken > 0 ? <Pair label="Transferred out" value={`−${inr(check.profitTaken)}`} /> : null}
       </dl>
@@ -663,6 +701,8 @@ function blank(date: string, credits = 0, countedBy = ""): CashClose {
     advanceServed: 0,
     profitTaken: 0,
     profitNote: "",
+    cashIn: 0,
+    cashInNote: "",
   };
 }
 

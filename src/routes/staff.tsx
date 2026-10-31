@@ -89,6 +89,7 @@ function StaffPage() {
       today,
       book.payouts ?? [],
       book.salaryPaid ?? [],
+      book.expenseLines ?? [],
     );
     return sum + snap.collection;
   }, 0);

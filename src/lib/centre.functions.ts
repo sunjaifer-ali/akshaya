@@ -2142,25 +2142,27 @@ export const saveSharedBook = createServerFn({ method: "POST" })
   .handler(async ({ context, data }) => {
     await requireAdmin(context.userId);
     if (!data?.book || !Array.isArray(data.book.cashCloses)) throw new Error("Book is incomplete.");
-    const { getSql } = await import("@/lib/db");
-    const sql = await getSql();
-    const current = await sql<{ data: LedgerData | string; touches: Record<string, string> | string }>`
-      select data, touches from centre_book where id = 'centre'
-    `;
-    const merged = mergeBook(readRow(current[0]), data);
-    const synced = await resyncCounterSplits(sql, merged.book);
-    const now = new Date().toISOString();
-    const touches = { ...merged.touches };
-    for (const date of synced.dates) touches[`day:${date}`] = now;
-    await writeBook(sql, synced.book, touches);
-    await ensureAdvanceTable(sql);
-    await stampAdvanceHeld(sql);
-    const fresh = await sql<{ data: LedgerData | string; touches: Record<string, string> | string }>`
-      select data, touches from centre_book where id = 'centre'
-    `;
-    const savedRow = readRow(fresh[0]);
-    const saved = { book: savedRow?.data ?? synced.book, touches: savedRow?.touches ?? touches };
+    const saved = await withTransaction(async (sql) => {
+      const current = await sql<{ data: LedgerData | string; touches: Record<string, string> | string }>`
+        select data, touches from centre_book where id = 'centre' for update
+      `;
+      const merged = mergeBook(readRow(current[0]), data);
+      const synced = await resyncCounterSplits(sql, merged.book);
+      const now = new Date().toISOString();
+      const touches = { ...merged.touches };
+      for (const date of synced.dates) touches[`day:${date}`] = now;
+      await writeBook(sql, synced.book, touches);
+      await ensureAdvanceTable(sql);
+      await stampAdvanceHeld(sql);
+      const fresh = await sql<{ data: LedgerData | string; touches: Record<string, string> | string }>`
+        select data, touches from centre_book where id = 'centre'
+      `;
+      const savedRow = readRow(fresh[0]);
+      return { book: savedRow?.data ?? synced.book, touches: savedRow?.touches ?? touches };
+    });
     try {
+      const { getSql } = await import("@/lib/db");
+      const sql = await getSql();
       await keepDailyBackup(sql, saved.book);
     } catch {
       // A backup problem must not lock the book.
@@ -2176,46 +2178,51 @@ export const saveSharedClose = createServerFn({ method: "POST" })
   })
   .handler(async ({ context, data }) => {
     const role = await requireClose(context.userId);
-    const { getSql } = await import("@/lib/db");
-    const sql = await getSql();
-    const current = await sql<{ data: LedgerData | string; touches: Record<string, string> | string }>`
-      select data, touches from centre_book where id = 'centre'
-    `;
-    const row = readRow(current[0]);
-    if (!row) throw new Error("The admin has to sign in once before a closing can be saved.");
-    const existing = (row.data.cashCloses ?? []).find((item) => item.date === data.date);
-    if (role === "closer" && existing?.accepted) throw new Error("This closing is accepted.");
-    const touches = { ...(row.touches ?? {}) };
-    const closes = (row.data.cashCloses ?? []).filter((item) => item.date !== data.date);
-    if (data.close) {
-      const sent = role === "closer" ? { ...data.close, accepted: false, profitTaken: existing?.profitTaken ?? 0, profitNote: existing?.profitNote ?? "" } : data.close;
-      const profitTaken = Math.round(Number(sent.profitTaken) || 0);
-      closes.push({
-        ...sent,
-        date: data.date,
-        countedBy: (sent.countedBy ?? "").trim().slice(0, 80),
-        accepted: role === "closer" ? false : Boolean(sent.accepted),
-        profitTaken: Number.isFinite(profitTaken) && profitTaken > 0 ? Math.min(profitTaken, 10000000) : 0,
-        profitNote: (sent.profitNote ?? "").trim().slice(0, 80),
-      });
-    }
-    closes.sort((a, b) => (a.date < b.date ? -1 : 1));
-    touches[data.date] = new Date().toISOString();
-    await ensureCustomerTable(sql);
-    const position = await positionAsOf(sql, data.date);
-    const stamped = closes.map((item) =>
-      item.date === data.date ? { ...item, creditGiven: position.given, creditPaid: position.paid, credits: position.unpaid } : item,
-    );
-    const book = { ...row.data, cashCloses: stamped };
-    await writeBook(sql, book, touches);
-    await ensureAdvanceTable(sql);
-    await stampAdvanceHeld(sql);
-    const fresh = await sql<{ data: LedgerData | string; touches: Record<string, string> | string }>`
-      select data, touches from centre_book where id = 'centre'
-    `;
-    const savedRow = readRow(fresh[0]);
-    const saved = { book: savedRow?.data ?? book, touches: savedRow?.touches ?? touches };
+    const saved = await withTransaction(async (sql) => {
+      const current = await sql<{ data: LedgerData | string; touches: Record<string, string> | string }>`
+        select data, touches from centre_book where id = 'centre' for update
+      `;
+      const row = readRow(current[0]);
+      if (!row) throw new Error("The admin has to sign in once before a closing can be saved.");
+      const existing = (row.data.cashCloses ?? []).find((item) => item.date === data.date);
+      if (role === "closer" && existing?.accepted) throw new Error("This closing is accepted.");
+      const touches = { ...(row.touches ?? {}) };
+      const closes = (row.data.cashCloses ?? []).filter((item) => item.date !== data.date);
+      if (data.close) {
+        const sent = role === "closer" ? { ...data.close, accepted: false, profitTaken: existing?.profitTaken ?? 0, profitNote: existing?.profitNote ?? "", cashIn: existing?.cashIn ?? 0, cashInNote: existing?.cashInNote ?? "" } : data.close;
+        const profitTaken = Math.round(Number(sent.profitTaken) || 0);
+        const cashIn = Math.round(Number(sent.cashIn) || 0);
+        closes.push({
+          ...sent,
+          date: data.date,
+          countedBy: (sent.countedBy ?? "").trim().slice(0, 80),
+          accepted: role === "closer" ? false : Boolean(sent.accepted),
+          profitTaken: Number.isFinite(profitTaken) && profitTaken > 0 ? Math.min(profitTaken, 10000000) : 0,
+          profitNote: (sent.profitNote ?? "").trim().slice(0, 80),
+          cashIn: Number.isFinite(cashIn) && cashIn > 0 ? Math.min(cashIn, 10000000) : 0,
+          cashInNote: (sent.cashInNote ?? "").trim().slice(0, 80),
+        });
+      }
+      closes.sort((a, b) => (a.date < b.date ? -1 : 1));
+      touches[data.date] = new Date().toISOString();
+      await ensureCustomerTable(sql);
+      const position = await positionAsOf(sql, data.date);
+      const stamped = closes.map((item) =>
+        item.date === data.date ? { ...item, creditGiven: position.given, creditPaid: position.paid, credits: position.unpaid } : item,
+      );
+      const book = { ...row.data, cashCloses: stamped };
+      await writeBook(sql, book, touches);
+      await ensureAdvanceTable(sql);
+      await stampAdvanceHeld(sql);
+      const fresh = await sql<{ data: LedgerData | string; touches: Record<string, string> | string }>`
+        select data, touches from centre_book where id = 'centre'
+      `;
+      const savedRow = readRow(fresh[0]);
+      return { book: savedRow?.data ?? book, touches: savedRow?.touches ?? touches };
+    });
     try {
+      const { getSql } = await import("@/lib/db");
+      const sql = await getSql();
       await keepDailyBackup(sql, saved.book);
     } catch {
       // A backup problem must not lock the book.
@@ -2232,26 +2239,29 @@ export const saveSharedDay = createServerFn({ method: "POST" })
   })
   .handler(async ({ context, data }) => {
     await requireAdmin(context.userId);
-    const { getSql } = await import("@/lib/db");
-    const sql = await getSql();
-    const current = await sql<{ data: LedgerData | string; touches: Record<string, string> | string }>`
-      select data, touches from centre_book where id = 'centre'
-    `;
-    const row = readRow(current[0]);
-    if (!row) throw new Error("The admin has to sign in once before a day can be saved.");
-    const touches = { ...(row.touches ?? {}) };
-    const days = (row.data.days ?? []).filter((item) => item.date !== data.date);
-    if (data.day && data.day.amount > 0) days.push({ ...data.day, date: data.date });
-    days.sort((a, b) => (a.date < b.date ? -1 : 1));
-    touches[`day:${data.date}`] = new Date().toISOString();
-    const book = applyImportedLeave({ ...row.data, days }, data.date);
-    await writeBook(sql, book, touches);
+    const saved = await withTransaction(async (sql) => {
+      const current = await sql<{ data: LedgerData | string; touches: Record<string, string> | string }>`
+        select data, touches from centre_book where id = 'centre' for update
+      `;
+      const row = readRow(current[0]);
+      if (!row) throw new Error("The admin has to sign in once before a day can be saved.");
+      const touches = { ...(row.touches ?? {}) };
+      const days = (row.data.days ?? []).filter((item) => item.date !== data.date);
+      if (data.day && data.day.amount > 0) days.push({ ...data.day, date: data.date });
+      days.sort((a, b) => (a.date < b.date ? -1 : 1));
+      touches[`day:${data.date}`] = new Date().toISOString();
+      const book = applyImportedLeave({ ...row.data, days }, data.date);
+      await writeBook(sql, book, touches);
+      return { book, touches } satisfies SharedBook;
+    });
     try {
-      await keepDailyBackup(sql, book);
+      const { getSql } = await import("@/lib/db");
+      const sql = await getSql();
+      await keepDailyBackup(sql, saved.book);
     } catch {
       // A backup problem must not lock the book.
     }
-    return { book, touches } satisfies SharedBook;
+    return saved;
   });
 
 export const exportCentreArchive = createServerFn({ method: "GET" })
@@ -2325,12 +2335,12 @@ export const listBackups = createServerFn({ method: "GET" })
         [day, day],
       );
       if (saved.length === 0) note = "No book is saved in Neon yet.";
-      await sql.query(`delete from centre_backup where taken_on < ($1::date - interval '7 days')`, [day]);
+      await sql.query(`delete from centre_backup where taken_on < ($1::date - interval '2 days')`, [day]);
     } catch (error) {
       note = error instanceof Error ? error.message : "Today's copy was not saved.";
     }
     const rows = await sql<{ id: string; takenOn: string }>`
-      select id, to_char(taken_on, 'YYYY-MM-DD') as "takenOn" from centre_backup order by taken_on desc limit 7
+      select id, to_char(taken_on, 'YYYY-MM-DD') as "takenOn" from centre_backup order by taken_on desc limit 3
     `;
     return {
       copies: rows.map((row) => {
@@ -2394,7 +2404,7 @@ async function keepDailyBackup(
      on conflict (id) do update set data = excluded.data, created_at = now()`,
     [day, day],
   );
-  await sql.query(`delete from centre_backup where taken_on < ($1::date - interval '7 days')`, [day]);
+  await sql.query(`delete from centre_backup where taken_on < ($1::date - interval '2 days')`, [day]);
   await trimStoredRows(sql);
 }
 
@@ -2519,6 +2529,7 @@ function archiveBook(value: unknown): LedgerData | null {
     cashCloses: Array.isArray(book.cashCloses) ? book.cashCloses : [],
     payouts: Array.isArray(book.payouts) ? book.payouts : [],
     salaryPaid: Array.isArray(book.salaryPaid) ? book.salaryPaid : [],
+    expenseLines: Array.isArray(book.expenseLines) ? book.expenseLines : [],
   };
 }
 

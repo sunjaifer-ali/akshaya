@@ -177,6 +177,7 @@ export type CloseCheck = {
   advanceChange: number;
   advanceServed: number;
   advanceIn: number;
+  cashIn: number;
   profitTaken: number;
   paidOut: number;
   receipts: number;
@@ -221,7 +222,7 @@ export function checkClose(
   const last = previousClose(closes, row.date);
   const gap = closeGap(row, last);
   const idle = idleBook();
-  const empty = { last: null as number | null, lastDate: "", movement: null as number | null, collected: null as number | null, personalGpay: 0, departmentGpay: 0, bankDepartment: 0, paidOut: 0, receipts: 0, payments: 0, serviceEarned: 0, income: 0, cashBook: idle, centreBook: idle, personalBook: idle, walletBook: idle, ...gap, advanceChange: 0, advanceServed: 0, advanceIn: 0, missing: [] as string[], difference: null as number | null, unfixed: null as number | null };
+  const empty = { last: null as number | null, lastDate: "", movement: null as number | null, collected: null as number | null, personalGpay: 0, departmentGpay: 0, bankDepartment: 0, paidOut: 0, receipts: 0, payments: 0, serviceEarned: 0, income: 0, cashBook: idle, centreBook: idle, personalBook: idle, walletBook: idle, ...gap, advanceChange: 0, advanceServed: 0, advanceIn: 0, cashIn: 0, missing: [] as string[], difference: null as number | null, unfixed: null as number | null };
   if (!last) return empty;
   const span = spanDates(last.date, row.date);
   const counterDay = (date: string) => {
@@ -250,13 +251,16 @@ export function checkClose(
   const advanceIn = typeof row.advanceIn === "number" ? Math.max(0, row.advanceIn) : Math.max(0, gap.advanceChange + (row.advanceServed ?? 0));
   const advanceServed = row.advanceServed ?? 0;
   const transfer = row.profitTaken ?? 0;
+  const cashIn = Math.max(0, Math.round(row.cashIn ?? 0));
   // A Personal GPay payment lands entirely in the personal account. None of it is expected
   // in the centre cash, wallets, or bank. The service-charge part is inside the counter
   // total, so it comes out with the department part that has already left the centre bank.
   const personalWhole = personalGpay + departmentGpay;
   const centreService = Math.max(0, known - personalGpay);
   const departmentOut = departmentGpay + bankDepartment;
-  const expected = opening + known - personalWhole - bankDepartment + creditPaid + advanceIn - creditGiven - advanceServed - paidOut - transfer;
+  // Cash in is money added from the owner's bank on this day only. It is already inside
+  // the counted closing, so it is added to the expected figure and is not income.
+  const expected = opening + known - personalWhole - bankDepartment + creditPaid + advanceIn + cashIn - creditGiven - advanceServed - paidOut - transfer;
   const actual = closeBase(row);
   const difference = actual - expected;
   return {
@@ -274,6 +278,7 @@ export function checkClose(
     personalBook: idle,
     walletBook: idle,
     advanceIn,
+    cashIn,
     missing: [],
     difference,
     unfixed: unfixedAmount(difference, row.fixed),

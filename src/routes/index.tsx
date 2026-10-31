@@ -38,6 +38,7 @@ function DeskPage() {
     today,
     book.payouts ?? [],
     book.salaryPaid ?? [],
+    book.expenseLines ?? [],
   );
   const rows = staffMonthRows(
     book.employees,

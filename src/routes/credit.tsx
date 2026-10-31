@@ -139,15 +139,94 @@ function CreditPage() {
       {tab === "credit" ? (
       <>
       <section className="grid gap-3 sm:grid-cols-3">
+        <TotalTile label="Still unpaid" value={stillUnpaid} note="Open credit" tone="ink" />
         <TotalTile label="Credit given" value={role === "admin" ? monthGiven : credit} note={role === "admin" ? `${formatMonth(month)} · today ${inr(credit)}` : "Today"} tone="bad" />
         <TotalTile label="Credit received" value={role === "admin" ? monthPaid : debit} note={role === "admin" ? `${formatMonth(month)} · today ${inr(debit)}` : "Today"} tone="good" />
-        <TotalTile label="Still unpaid" value={stillUnpaid} note="Open credit" tone="ink" />
       </section>
       {role === "admin" ? (
         <div className="mt-4">
           <DaySelect value={day} dates={movementDates} onChange={setDay} />
         </div>
       ) : null}
+      <section className="mt-4 rounded-xl border border-line bg-surface p-5">
+        <h2 className="font-display text-2xl">Still unpaid</h2>
+        {open.length === 0 ? <p className="mt-2 text-sm text-muted">Nobody owes money.</p> : null}
+        {byMonth(open).map((group) => (
+          <div key={group.month}>
+            <h3 className="mt-4 text-xs font-semibold tracking-widest text-faint">{formatMonth(group.month)}</h3>
+            <ul className="divide-y divide-line">
+              {group.rows.map((line) => (
+            <li key={`${line.customer}-${line.mobile}`} className="py-3 text-sm">
+              <div className="flex items-center justify-between gap-3">
+                <span>
+                  {line.customer}
+                  <span className="mt-0.5 block text-xs text-faint">
+                    {formatDay(line.date)}
+                    {line.staff ? ` · ${line.staff}` : ""}
+                    {line.mobile ? ` · ${line.mobile}` : " · No mobile yet"}
+                  </span>
+                </span>
+                <span className="flex items-center gap-3">
+                  <span className="text-lg font-medium tabular-nums">{inr(line.balance)}</span>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => {
+                      setPayFor(line.customer);
+                      setPayAmount(String(line.balance));
+                      setPayMobile(line.mobile);
+                      setNotice("");
+                    }}
+                  >
+                    Update
+                  </Button>
+                </span>
+              </div>
+              {payFor === line.customer ? (
+                <form
+                  className="mt-2 grid gap-2 sm:grid-cols-[8rem_1fr_auto]"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    setPending(true);
+                    setNotice("");
+                    void addCustomerMove({
+                      data: { kind: "debit", customer: line.customer, mobile: payMobile || line.mobile, amount: Number(payAmount) },
+                    })
+                      .then(() => {
+                        setPayFor("");
+                        setResult({ ok: true, message: "Payment successfully updated. The unpaid balance has changed." });
+                        load();
+                      })
+                      .catch((error: unknown) => setResult({ ok: false, message: error instanceof Error ? error.message : "Payment not updated." }))
+                      .finally(() => setPending(false));
+                  }}
+                >
+                  <input
+                    inputMode="numeric"
+                    aria-label={`Amount paid by ${line.customer}`}
+                    className="h-11 rounded-sm border border-line bg-bg px-3 text-base outline-none focus:border-accent"
+                    value={payAmount}
+                    onChange={(event) => setPayAmount(event.target.value)}
+                  />
+                  <input
+                    inputMode="numeric"
+                    aria-label={`Mobile for ${line.customer}`}
+                    placeholder="Mobile"
+                    className="h-11 rounded-sm border border-line bg-bg px-3 text-base outline-none focus:border-accent"
+                    value={payMobile}
+                    onChange={(event) => setPayMobile(event.target.value)}
+                  />
+                  <Button type="submit" disabled={pending}>
+                    Paid
+                  </Button>
+                </form>
+              ) : null}
+            </li>
+              ))}
+            </ul>
+          </div>
+        ))}
+      </section>
       <div className="mt-4 grid items-start gap-4 sm:grid-cols-2">
       <section className="rounded-xl border border-line border-l-4 border-l-bad bg-surface p-5">
         <h2 className="font-display text-2xl">Credit given</h2>
@@ -208,86 +287,6 @@ function CreditPage() {
       {role === "admin" ? <MoveList lines={paidLines} empty="No credit received in this view." onDelete={(id) => deleteMove(id, setResult, load)} /> : <p className="mt-3 text-sm text-muted">Today {inr(debit)}</p>}
       </section>
       </div>
-      <section className="mt-4 rounded-xl border border-line bg-surface p-5">
-        <h2 className="font-display text-2xl">Still unpaid</h2>
-        {open.length === 0 ? <p className="mt-2 text-sm text-muted">Nobody owes money.</p> : null}
-        {byMonth(open).map((group) => (
-          <div key={group.month}>
-            <h3 className="mt-4 text-xs font-semibold tracking-widest text-faint">{formatMonth(group.month)}</h3>
-            <ul className="divide-y divide-line">
-              {group.rows.map((line) => (
-            <li key={`${line.customer}-${line.mobile}`} className="py-3 text-sm">
-              <div className="flex items-center justify-between gap-3">
-                <span>
-                  {line.customer}
-                  <span className="mt-0.5 block text-xs text-faint">
-                    {formatDay(line.date)}
-                    {line.staff ? ` · ${line.staff}` : ""}
-                    {line.mobile ? ` · ${line.mobile}` : " · No mobile yet"}
-                  </span>
-                </span>
-                <span className="flex items-center gap-3">
-                  <span className="text-lg font-medium tabular-nums">{inr(line.balance)}</span>
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    onClick={() => {
-                      setPayFor(line.customer);
-                      setPayAmount(String(line.balance));
-                      setPayMobile(line.mobile);
-                      setNotice("");
-                    }}
-                  >
-                    Update
-                  </Button>
-                </span>
-              </div>
-              {payFor === line.customer ? (
-                <form
-                  className="mt-2 grid gap-2 sm:grid-cols-[8rem_1fr_auto]"
-                  onSubmit={(event) => {
-                    event.preventDefault();
-                    setPending(true);
-                    setNotice("");
-                    void addCustomerMove({
-                      data: { kind: "debit", customer: line.customer, mobile: payMobile || line.mobile, amount: Number(payAmount) },
-                    })
-                      .then(() => {
-                        setPayFor("");
-                        setPayFor("");
-                        setResult({ ok: true, message: "Payment successfully updated. The unpaid balance has changed." });
-                        load();
-                      })
-                      .catch((error: unknown) => setResult({ ok: false, message: error instanceof Error ? error.message : "Payment not updated." }))
-                      .finally(() => setPending(false));
-                  }}
-                >
-                  <input
-                    inputMode="numeric"
-                    aria-label={`Amount paid by ${line.customer}`}
-                    className="h-11 rounded-sm border border-line bg-bg px-3 text-base outline-none focus:border-accent"
-                    value={payAmount}
-                    onChange={(event) => setPayAmount(event.target.value)}
-                  />
-                  <input
-                    inputMode="numeric"
-                    aria-label={`Mobile for ${line.customer}`}
-                    placeholder="Mobile"
-                    className="h-11 rounded-sm border border-line bg-bg px-3 text-base outline-none focus:border-accent"
-                    value={payMobile}
-                    onChange={(event) => setPayMobile(event.target.value)}
-                  />
-                  <Button type="submit" disabled={pending}>
-                    Paid
-                  </Button>
-                </form>
-              ) : null}
-            </li>
-              ))}
-            </ul>
-          </div>
-        ))}
-      </section>
       </>
       ) : null}
       <ResultDialog result={result} onClose={() => setResult(null)} />

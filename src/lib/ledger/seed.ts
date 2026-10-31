@@ -196,6 +196,7 @@ export function buildSample(): LedgerData {
     lyOverrides: {},
     cashCloses: [],
     salaryPaid: [],
+    expenseLines: [],
   };
 }
 
@@ -215,6 +216,7 @@ export function emptyBook(centreName: string): LedgerData {
     lyOverrides: {},
     cashCloses: [],
     salaryPaid: [],
+    expenseLines: [],
   };
 }
 
@@ -426,5 +428,6 @@ export function buildCentreBook(): LedgerData {
     lyOverrides: { ...LAST_YEAR },
     cashCloses: [],
     salaryPaid: [],
+    expenseLines: [],
   };
 }

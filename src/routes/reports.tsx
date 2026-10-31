@@ -52,6 +52,7 @@ function ReportsPage() {
       today,
       book.payouts ?? [],
       book.salaryPaid ?? [],
+      book.expenseLines ?? [],
     ),
   );
   const shown = snaps.filter((row) => monthCounts(row, anchor, book.leaves));
@@ -206,6 +207,9 @@ async function buildReportWorkbook(
     const lines = book.cashCloses
       .filter((item) => months.includes(item.date.slice(0, 7)) && (item.profitTaken ?? 0) > 0)
       .sort((a, b) => (a.date < b.date ? -1 : 1));
+    const added = book.cashCloses
+      .filter((item) => months.includes(item.date.slice(0, 7)) && (item.cashIn ?? 0) > 0)
+      .sort((a, b) => (a.date < b.date ? -1 : 1));
     return {
       name: `Transfers-${safeYear}.xlsx`,
       sheets: [
@@ -215,6 +219,14 @@ async function buildReportWorkbook(
             ["Date", "Account", "Amount"],
             ...lines.map((item) => [formatDay(item.date), item.profitNote || "Own account", item.profitTaken ?? 0]),
             ["Total", "", lines.reduce((sum, item) => sum + (item.profitTaken ?? 0), 0)],
+          ],
+        },
+        {
+          name: "Cash in",
+          rows: [
+            ["Date", "From", "Amount"],
+            ...added.map((item) => [formatDay(item.date), item.cashInNote || "Own bank", item.cashIn ?? 0]),
+            ["Total", "", added.reduce((sum, item) => sum + (item.cashIn ?? 0), 0)],
           ],
         },
       ],
@@ -275,8 +287,8 @@ async function buildReportWorkbook(
     };
   }
   if (kind === "expenses") {
-    const categories = book.categories.filter(
-      (category) => category.builtin || shown.some((row) => (book.expenses[row.month]?.[category.id] ?? 0) > 0),
+    const categories = book.categories.filter((category) =>
+      shown.some((row) => (book.expenses[row.month]?.[category.id] ?? 0) > 0 || payoutTotal(book.payouts, row.month, category.id) > 0),
     );
     const months = shown.map((row) => formatMonthShort(row.month));
     const line = (label: string, values: number[]) => [label, ...values, values.reduce((sum, amount) => sum + amount, 0)];
@@ -297,6 +309,7 @@ async function buildReportWorkbook(
               ? [line("Other", shown.map((row) => payoutTotal(book.payouts, row.month, "other")))]
               : []),
             line("Expenses", shown.map((row) => row.expense)),
+            line("Self expenses (margin)", shown.map((row) => row.selfExpense)),
             line("Salary", shown.map((row) => row.basicPay)),
             line("Incentive", shown.map((row) => row.incentive)),
             line("Total salary", shown.map((row) => row.salary)),
@@ -571,9 +584,8 @@ function StaffStatement({
 
 function ExpenseStatement({ shown }: { shown: CentreSnapshot[] }) {
   const book = useLedger();
-  const categories = book.categories.filter(
-    (category) =>
-      category.builtin || shown.some((row) => (book.expenses[row.month]?.[category.id] ?? 0) > 0),
+  const categories = book.categories.filter((category) =>
+    shown.some((row) => (book.expenses[row.month]?.[category.id] ?? 0) > 0 || payoutTotal(book.payouts, row.month, category.id) > 0),
   );
   const centre = shown.reduce((sum, row) => sum + row.collection, 0);
   const expense = shown.reduce((sum, row) => sum + row.expense, 0);
@@ -624,6 +636,13 @@ function ExpenseStatement({ shown }: { shown: CentreSnapshot[] }) {
               <Cell key={row.month}>{inr(row.expense)}</Cell>
             ))}
             <Cell>{inr(expense)}</Cell>
+          </tr>
+          <tr className="border-b border-line">
+            <th className="sticky left-0 bg-surface px-3 py-3 text-left font-medium">Self expenses, in margin</th>
+            {shown.map((row) => (
+              <Cell key={row.month}>{row.selfExpense > 0 ? inr(row.selfExpense) : "—"}</Cell>
+            ))}
+            <Cell>{inr(shown.reduce((sum, row) => sum + row.selfExpense, 0))}</Cell>
           </tr>
           <tr className="border-b border-line">
             <th className="sticky left-0 bg-surface px-3 py-3 text-left font-medium">Salary</th>
@@ -738,12 +757,16 @@ function AttendanceCell({ item }: { item: MonthAttendance }) {
   );
 }
 
-function TransferStatement({ fy, closes }: { fy: number; closes: { date: string; profitTaken?: number; profitNote?: string }[] }) {
+function TransferStatement({ fy, closes }: { fy: number; closes: { date: string; profitTaken?: number; profitNote?: string; cashIn?: number; cashInNote?: string }[] }) {
   const months = fyMonths(fy);
   const lines = closes
     .filter((item) => months.includes(item.date.slice(0, 7)) && (item.profitTaken ?? 0) > 0)
     .sort((a, b) => (a.date < b.date ? -1 : 1));
+  const added = closes
+    .filter((item) => months.includes(item.date.slice(0, 7)) && (item.cashIn ?? 0) > 0)
+    .sort((a, b) => (a.date < b.date ? -1 : 1));
   const total = lines.reduce((sum, item) => sum + (item.profitTaken ?? 0), 0);
+  const addedTotal = added.reduce((sum, item) => sum + (item.cashIn ?? 0), 0);
   const byMonth = months
     .map((month) => {
       const rows = lines.filter((item) => item.date.startsWith(month));
@@ -751,33 +774,53 @@ function TransferStatement({ fy, closes }: { fy: number; closes: { date: string;
       return { month, rows, amount };
     })
     .filter((item) => item.amount > 0);
-  if (lines.length === 0) return <p className="rounded-xl border border-line bg-surface p-5 text-sm text-muted">No transfer in {fyLabel(fy)}.</p>;
+  if (lines.length === 0 && added.length === 0) return <p className="rounded-xl border border-line bg-surface p-5 text-sm text-muted">No transfer in {fyLabel(fy)}.</p>;
   return (
-    <section className="rounded-xl border border-line bg-surface p-5">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <h2 className="font-display text-2xl">Transferred</h2>
-        <p className="font-display text-3xl tabular-nums">{inr(total)}</p>
-      </div>
-      {byMonth.map((group) => (
-        <div key={group.month} className="mt-4">
-          <div className="flex items-baseline justify-between gap-3">
-            <h3 className="text-sm font-medium">{formatMonthShort(group.month)}</h3>
-            <p className="tabular-nums">{inr(group.amount)}</p>
-          </div>
-          <ul className="mt-1 divide-y divide-line">
-            {group.rows.map((item) => (
-              <li key={item.date} className="flex items-center justify-between gap-3 py-2 text-sm">
-                <span>
-                  {formatDay(item.date)}
-                  {item.profitNote ? <span className="mt-0.5 block text-xs text-faint">{item.profitNote}</span> : null}
-                </span>
-                <span className="tabular-nums">{inr(item.profitTaken ?? 0)}</span>
-              </li>
-            ))}
-          </ul>
+    <div className="grid gap-4">
+      <section className="rounded-xl border border-line bg-surface p-5">
+        <div className="flex flex-wrap items-end justify-between gap-3">
+          <h2 className="font-display text-2xl">Transferred</h2>
+          <p className="font-display text-3xl tabular-nums">{inr(total)}</p>
         </div>
-      ))}
-    </section>
+        {byMonth.map((group) => (
+          <div key={group.month} className="mt-4">
+            <div className="flex items-baseline justify-between gap-3">
+              <h3 className="text-sm font-medium">{formatMonthShort(group.month)}</h3>
+              <p className="tabular-nums">{inr(group.amount)}</p>
+            </div>
+            <ul className="mt-1 divide-y divide-line">
+              {group.rows.map((item) => (
+                <li key={item.date} className="flex items-center justify-between gap-3 py-2 text-sm">
+                  <span>
+                    {formatDay(item.date)}
+                    {item.profitNote ? <span className="mt-0.5 block text-xs text-faint">{item.profitNote}</span> : null}
+                  </span>
+                  <span className="tabular-nums">{inr(item.profitTaken ?? 0)}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))}
+      </section>
+      <section className="rounded-xl border border-line bg-surface p-5">
+        <div className="flex flex-wrap items-end justify-between gap-3">
+          <h2 className="font-display text-2xl">Cash in</h2>
+          <p className="font-display text-3xl tabular-nums">{inr(addedTotal)}</p>
+        </div>
+        {added.length === 0 ? <p className="mt-2 text-sm text-muted">No money added from your bank.</p> : null}
+        <ul className="mt-1 divide-y divide-line">
+          {added.map((item) => (
+            <li key={item.date} className="flex items-center justify-between gap-3 py-2 text-sm">
+              <span>
+                {formatDay(item.date)}
+                {item.cashInNote ? <span className="mt-0.5 block text-xs text-faint">{item.cashInNote}</span> : null}
+              </span>
+              <span className="tabular-nums">{inr(item.cashIn ?? 0)}</span>
+            </li>
+          ))}
+        </ul>
+      </section>
+    </div>
   );
 }
 

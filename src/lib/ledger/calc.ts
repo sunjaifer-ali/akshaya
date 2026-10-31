@@ -4,11 +4,13 @@ import type {
   CollectionDay,
   Desk,
   Employee,
+  ExpenseLine,
   LeaveCode,
   LeaveMark,
   PerfOverride,
   SalaryPaid,
 } from "@/lib/ledger/types";
+import { isSelfExpense } from "@/lib/ledger/types";
 
 export function monthDays(days: CollectionDay[], month: string): CollectionDay[] {
   return days.filter((day) => day.date.startsWith(month));
@@ -200,6 +202,15 @@ export function expenseTotal(
   return Object.values(row).reduce((sum, amount) => sum + amount, 0);
 }
 
+export function expenseLineTotal(lines: ExpenseLine[] | undefined, month: string, which: "cost" | "self" = "cost"): number {
+  return (lines ?? []).reduce((sum, line) => {
+    if (line.month !== month) return sum;
+    const self = isSelfExpense(line.category);
+    if (which === "cost" && self) return sum;
+    if (which === "self" && !self) return sum;
+    return sum + (line.amount || 0);
+  }, 0);
+}
 export function payoutTotal(payouts: CentrePayout[] | undefined, month: string, categoryId?: string): number {
   return (payouts ?? []).reduce((sum, item) => {
     if (!item.date.startsWith(month)) return sum;
@@ -485,6 +496,7 @@ export type CentreSnapshot = {
   lastYearPartial: boolean;
   growth: number | null;
   growthPct: number | null;
+  selfExpense: number;
 };
 
 export function centreSnapshot(
@@ -500,6 +512,7 @@ export function centreSnapshot(
   asOf = "",
   payouts: CentrePayout[] = [],
   salaryPaid: SalaryPaid[] = [],
+  expenseLines: ExpenseLine[] = [],
 ): CentreSnapshot {
   const collection = monthCollection(days, month);
   const rows = staffMonthRows(
@@ -514,7 +527,8 @@ export function centreSnapshot(
     asOf,
     salaryPaid,
   );
-  const expense = expenseTotal(expenses, month) + payoutTotal(payouts, month);
+  const selfExpense = expenseLineTotal(expenseLines, month, "self");
+  const expense = expenseTotal(expenses, month) + payoutTotal(payouts, month) + expenseLineTotal(expenseLines, month, "cost");
   const basicPay = rows.reduce((sum, row) => sum + row.pay.basicPayable, 0);
   const incentivePay = rows.reduce((sum, row) => sum + row.pay.incentive, 0);
   const salary = basicPay + incentivePay;
@@ -541,5 +555,6 @@ export function centreSnapshot(
     lastYearPartial: prior.partial,
     growth: growth.diff,
     growthPct: growth.pct,
+    selfExpense,
   };
 }

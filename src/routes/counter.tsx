@@ -695,38 +695,6 @@ function CounterCredit({ month, onResult }: { month: string; onResult: (result: 
 
   return (
     <>
-      <div className="mt-4 grid items-start gap-4 sm:grid-cols-2">
-        <section className="rounded-xl border border-line border-l-4 border-l-bad bg-surface p-5">
-          <h2 className="font-display text-2xl">Credit given</h2>
-          <p className="mt-1 font-display text-3xl tabular-nums">{inr(given)}</p>
-          <form
-            className="mt-3 grid gap-3"
-            onSubmit={(event) => {
-              event.preventDefault();
-              setPending(true);
-              void addCustomerMove({ data: { kind: "credit", customer, mobile, amount: Number(amount) } })
-                .then(() => {
-                  setCustomer("");
-                  setMobile("");
-                  setAmount("");
-                  onResult({ ok: true, message: "Credit saved." });
-                  load();
-                })
-                .catch((error: unknown) => onResult({ ok: false, message: error instanceof Error ? error.message : "Credit was not saved." }))
-                .finally(() => setPending(false));
-            }}
-          >
-            <input aria-label="Credit customer" className="h-11 rounded-sm border border-line bg-bg px-3" placeholder="Customer" value={customer} onChange={(event) => setCustomer(event.target.value)} />
-            <input aria-label="Credit mobile" inputMode="numeric" className="h-11 rounded-sm border border-line bg-bg px-3" placeholder="Mobile" value={mobile} onChange={(event) => setMobile(event.target.value)} />
-            <input aria-label="Credit amount" inputMode="numeric" className="h-11 rounded-sm border border-line bg-bg px-3" placeholder="Whole bill" value={amount} onChange={(event) => setAmount(event.target.value)} />
-            <Button type="submit" disabled={pending}>Add credit</Button>
-          </form>
-        </section>
-        <section className="rounded-xl border border-line border-l-4 border-l-accent bg-surface p-5">
-          <h2 className="font-display text-2xl">Credit received</h2>
-          <p className="mt-1 font-display text-3xl tabular-nums">{inr(received)}</p>
-        </section>
-      </div>
       <section className="mt-4 rounded-xl border border-line bg-surface p-5">
         <h2 className="font-display text-2xl">Still unpaid</h2>
         {open.length === 0 ? <p className="mt-3 text-sm text-muted">No open credit.</p> : null}
@@ -763,6 +731,38 @@ function CounterCredit({ month, onResult }: { month: string; onResult: (result: 
           ))}
         </ul>
       </section>
+      <div className="mt-4 grid items-start gap-4 sm:grid-cols-2">
+        <section className="rounded-xl border border-line border-l-4 border-l-bad bg-surface p-5">
+          <h2 className="font-display text-2xl">Credit given</h2>
+          <p className="mt-1 font-display text-3xl tabular-nums">{inr(given)}</p>
+          <form
+            className="mt-3 grid gap-3"
+            onSubmit={(event) => {
+              event.preventDefault();
+              setPending(true);
+              void addCustomerMove({ data: { kind: "credit", customer, mobile, amount: Number(amount) } })
+                .then(() => {
+                  setCustomer("");
+                  setMobile("");
+                  setAmount("");
+                  onResult({ ok: true, message: "Credit saved." });
+                  load();
+                })
+                .catch((error: unknown) => onResult({ ok: false, message: error instanceof Error ? error.message : "Credit was not saved." }))
+                .finally(() => setPending(false));
+            }}
+          >
+            <input aria-label="Credit customer" className="h-11 rounded-sm border border-line bg-bg px-3" placeholder="Customer" value={customer} onChange={(event) => setCustomer(event.target.value)} />
+            <input aria-label="Credit mobile" inputMode="numeric" className="h-11 rounded-sm border border-line bg-bg px-3" placeholder="Mobile" value={mobile} onChange={(event) => setMobile(event.target.value)} />
+            <input aria-label="Credit amount" inputMode="numeric" className="h-11 rounded-sm border border-line bg-bg px-3" placeholder="Whole bill" value={amount} onChange={(event) => setAmount(event.target.value)} />
+            <Button type="submit" disabled={pending}>Add credit</Button>
+          </form>
+        </section>
+        <section className="rounded-xl border border-line border-l-4 border-l-accent bg-surface p-5">
+          <h2 className="font-display text-2xl">Credit received</h2>
+          <p className="mt-1 font-display text-3xl tabular-nums">{inr(received)}</p>
+        </section>
+      </div>
     </>
   );
 }

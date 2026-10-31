@@ -87,6 +87,7 @@ function NotePage() {
     today,
     book.payouts ?? [],
     book.salaryPaid ?? [],
+    book.expenseLines ?? [],
   ).growthPct;
   const through = today && today.startsWith(month) ? today : (datesInMonth(month).at(-1) ?? `${month}-28`);
   const pace = {

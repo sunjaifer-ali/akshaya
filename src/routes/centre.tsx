@@ -46,6 +46,7 @@ function CentrePage() {
       today,
       book.payouts ?? [],
       book.salaryPaid ?? [],
+      book.expenseLines ?? [],
     ),
   );
   const visible = rows.filter((row) => row.month <= anchor || row.collection > 0 || row.expense > 0);
@@ -69,6 +70,7 @@ function CentrePage() {
       today,
       book.payouts ?? [],
       book.salaryPaid ?? [],
+      book.expenseLines ?? [],
     );
 
   const totals = visible.reduce(

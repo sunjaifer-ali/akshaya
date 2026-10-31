@@ -37,7 +37,7 @@ export function BackupDialog({ open, onOpenChange }: { open: boolean; onOpenChan
       open={open}
       onOpenChange={onOpenChange}
       title="Backup"
-      description="Neon keeps a copy for each of the last 7 days. Restore puts that day's book back."
+      description="Neon keeps a copy for each of the last 3 days. Older copies are removed. Restore puts that day's book back."
     >
       <div className="rounded-lg border border-line p-3">
         <p className="text-sm font-medium">Saved copies</p>
@@ -114,6 +114,7 @@ function asBook(data: LedgerData): LedgerData {
     days: data.days,
     categories: data.categories,
     expenses: data.expenses,
+    expenseLines: data.expenseLines ?? [],
     leaves: data.leaves,
     holidays: data.holidays,
     perfOverrides: data.perfOverrides,

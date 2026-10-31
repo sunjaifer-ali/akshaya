@@ -71,7 +71,7 @@ const MORE_LABEL: Record<(typeof NAV)[number]["to"], string> = {
   "/salary": "Salary",
   "/expenses": "Expenses",
   "/centre": "Centre performance",
-  "/reports": "Consolidated reports",
+  "/reports": "Reports",
   "/staff": "Staff report",
   "/leave": "Leave register",
 };

@@ -31,6 +31,7 @@ function snapshot(): LedgerData {
     days: state.days,
     categories: state.categories,
     expenses: state.expenses,
+    expenseLines: state.expenseLines ?? [],
     leaves: state.leaves,
     holidays: state.holidays,
     perfOverrides: state.perfOverrides,
@@ -50,6 +51,7 @@ function asBook(book: LedgerData): LedgerData {
     cashCloses: book.cashCloses ?? [],
     payouts: book.payouts ?? [],
     salaryPaid: book.salaryPaid ?? [],
+    expenseLines: book.expenseLines ?? [],
     categories: withCategories(book.categories),
   };
 }
