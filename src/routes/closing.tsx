@@ -84,6 +84,16 @@ function ClosingPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [date]);
 
+  useEffect(() => {
+    if (!saved) return;
+    setDraft((current) => {
+      if (current.date !== date) return current;
+      if ((current.cashIn ?? 0) > 0 || (current.cashInNote ?? "").trim()) return current;
+      if ((saved.cashIn ?? 0) <= 0 && !(saved.cashInNote ?? "").trim()) return current;
+      return { ...current, cashIn: saved.cashIn ?? 0, cashInNote: saved.cashInNote ?? "" };
+    });
+  }, [date, saved]);
+
   useRefresh(() => {
     if (role !== "admin" && role !== "closer") return;
     return closingDesk({ data: date })
@@ -98,7 +108,15 @@ function ClosingPage() {
       .catch(() => undefined);
   }, 45000, [date, role]);
 
-  const base = editing ? draft : (saved ?? draft);
+  const base = editing
+    ? draft
+    : {
+        ...(saved ?? draft),
+        cashIn: draft.cashIn,
+        cashInNote: draft.cashInNote,
+        profitTaken: draft.profitTaken,
+        profitNote: draft.profitNote,
+      };
   const separate = Boolean(saved?.creditSeparate) || !saved || Boolean(today && date >= today);
   const useLiveAdvance = Boolean(liveAdvance?.tracked);
   const row = {
@@ -142,7 +160,7 @@ function ClosingPage() {
     void navigate({ search: { d: next } });
   };
   const patch = (next: Partial<CashClose>) => {
-    setDraft({ ...draft, ...next, date });
+    setDraft((current) => ({ ...current, ...next, date }));
   };
 
   return (
@@ -265,6 +283,7 @@ function ClosingPage() {
                 const existing = book.cashCloses.find((item) => item.date === date);
                 const next = { ...(existing ?? blank(date)), date, cashIn: row.cashIn ?? 0, cashInNote: row.cashInNote ?? "", accepted: existing?.accepted ?? false };
                 book.setCashClose(next);
+                setDraft(next);
                 setResult({ ok: true, message: "Cash in saved. The day stays open." });
                 void pushClose(date, next).catch((error: unknown) => {
                   setResult({ ok: false, message: error instanceof Error ? error.message : "Saved on this browser, but not shared." });
