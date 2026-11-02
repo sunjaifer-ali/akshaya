@@ -314,7 +314,7 @@ export function Shell({ children }: { children: ReactNode }) {
           )}
         </header>
 
-        <main className="mx-auto w-full max-w-6xl px-4 pb-28 pt-3 md:px-6 md:pb-4 md:pt-4">
+        <main className="mx-auto w-full max-w-5xl px-4 pb-28 pt-4 md:px-8 md:pb-12 md:pt-8">
           <img src="/akshaya-logo.png" alt="Akshaya" className="mx-auto mb-4 hidden h-14 w-auto print:block" />
           {blocked ? (
             <div className="no-print mb-5 rounded-lg border border-line bg-accent-soft p-4 text-sm text-ink">{blocked}</div>

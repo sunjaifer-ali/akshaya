@@ -161,7 +161,7 @@ function CounterPage() {
       )}
       {gpayLines.length > 0 ? (
         <p className="mt-3 text-base tabular-nums">
-          Personal GPay {inr(gpayTotal)} · Service {inr(gpayService)} · Department {inr(gpayDepartment)}
+          Paid to personal number (9995080431) {inr(gpayTotal)} · Service {inr(gpayService)} · Department {inr(gpayDepartment)}
         </p>
       ) : null}
       {role === "admin" && unmatched.length > 0 ? (
@@ -272,7 +272,7 @@ function CounterPage() {
                 }
               }}
             />
-            Personal GPay (9995080431)
+            Paid to personal number (9995080431)
           </label>
           {personalGpay ? (
             <label className="block text-sm sm:col-span-2">
@@ -435,7 +435,7 @@ function CustomerLines({
                   {line.mobile ? ` · ${line.mobile}` : ""}
                   {` · ${modeWord(line)}`}
                   {line.personalGpay
-                    ? ` · Personal GPay · total ${inr(line.amount + (line.department || 0))} · service ${inr(line.amount)} · department ${inr(line.department || 0)}`
+                    ? ` · Paid to 9995080431 · total ${inr(line.amount + (line.department || 0))} · service ${inr(line.amount)} · department ${inr(line.department || 0)}`
                     : ""}
                 </p>
               </div>
@@ -548,7 +548,7 @@ function EditCharge({ line, onClose, onResult }: { line: ServiceLine; onClose: (
               }
             }}
           />
-          Personal GPay (9995080431)
+          Paid to personal number (9995080431)
         </label>
         {personalGpay ? (
           <label className="block text-sm sm:col-span-2">

@@ -180,7 +180,7 @@ function CentrePage() {
       <>
       <section className="print-chart mt-4 rounded-xl border border-line bg-surface p-5">
         <h2 className="font-display text-2xl">Collection against last year</h2>
-        <div className="mt-3 h-52 min-w-0">
+        <div className="mt-3 h-64 min-w-0">
           {mounted ? (
             <ChartFrame>
             <ResponsiveContainer width="100%" height="100%" minWidth={0}>

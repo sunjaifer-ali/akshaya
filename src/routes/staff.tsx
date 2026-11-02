@@ -228,7 +228,7 @@ function StaffPage() {
                 <Mini label="Pay % of their work" value={ytdCollection > 0 ? pct((ytdPay / ytdCollection) * 100) : "—"} />
                 <Mini label="Share of centre" value={centreYear > 0 ? pct((ytdCollection / centreYear) * 100) : "—"} />
               </div>
-              <div className="print-chart mt-4 h-40 min-w-0">
+              <div className="print-chart mt-4 h-56 min-w-0">
                 {mounted ? (
                   <ChartFrame>
                   <ResponsiveContainer width="100%" height="100%" minWidth={0}>

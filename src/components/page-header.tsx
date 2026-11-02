@@ -14,10 +14,10 @@ export function PageHeader({
   className?: string;
 }) {
   return (
-    <div className={`mb-2 flex flex-wrap items-end justify-between gap-2 ${className}`}>
+    <div className={`mb-5 flex flex-wrap items-end justify-between gap-3 ${className}`}>
       <div className="max-w-2xl">
         {kicker ? <p className="text-xs font-semibold tracking-widest text-accent">{kicker}</p> : null}
-        <h1 className="font-display text-2xl leading-tight text-accent md:text-3xl">{title}</h1>
+        <h1 className="font-display text-3xl leading-tight text-accent">{title}</h1>
         {lede ? <p className="mt-1 text-sm text-muted">{lede}</p> : null}
       </div>
       {actions}
