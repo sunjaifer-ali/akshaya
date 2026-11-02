@@ -2,6 +2,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { Bar, BarChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { PageHeader } from "@/components/page-header";
+import { ChartFrame } from "@/components/chart-frame";
 import { chartColors } from "@/lib/chart-colors";
 import { cn } from "@/lib/cn";
 import { inr, signedInr } from "@/lib/format";
@@ -100,27 +101,18 @@ function DeskPage() {
   }, []);
 
   return (
-    <div>
+    <div className={cn("lg:grid lg:h-[calc(100dvh-2rem)] lg:gap-3 lg:overflow-hidden", attention.length > 0 || oldCredit.length > 0 ? "lg:grid-rows-[auto_auto_minmax(0,1fr)]" : "lg:grid-rows-[auto_minmax(0,1fr)]")}>
       <PageHeader
+        className="mb-2"
         kicker="DESK"
         title={book.centreName}
         lede={today ? formatFull(today) : "Centre book"}
       />
 
-      <section className="mt-4 rounded-xl border border-line bg-surface p-5">
-        <h2 className="font-display text-2xl">Needs attention</h2>
-        {attention.length > 0 ? (
-          <ul className="mt-2 divide-y divide-line">
-            {attention.map((item) => (
-              <li key={item.text}>
-                <ReviewLink item={item} />
-              </li>
-            ))}
-          </ul>
-        ) : !mounted || oldCredit.length === 0 ? (
-          <p className="mt-2 text-sm text-muted">{mounted ? "Nothing outstanding." : "Checking the book…"}</p>
-        ) : null}
-        <div className="mt-4 flex flex-wrap items-center gap-3 border-t border-line pt-4">
+      {attention.length > 0 || oldCredit.length > 0 ? (
+      <section className="mt-2 rounded-xl border border-line bg-surface px-4 py-3 lg:mt-0">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h2 className="font-medium">Needs attention</h2>
           <label className="flex items-center gap-2 text-sm">
             Credit older than
             <input
@@ -128,7 +120,7 @@ function DeskPage() {
               min={1}
               max={365}
               aria-label="Days before a credit is shown"
-              className="h-11 w-20 rounded-sm border border-line bg-bg px-3 text-right text-base tabular-nums outline-none focus:border-accent"
+              className="h-9 w-16 rounded-sm border border-line bg-bg px-2 text-right text-base tabular-nums outline-none focus:border-accent"
               value={warnDays}
               onChange={(event) => {
                 const next = Math.min(365, Math.max(1, Math.round(Number(event.target.value) || 1)));
@@ -137,12 +129,21 @@ function DeskPage() {
               }}
             />
             days
+            <span className="font-medium tabular-nums">{oldCredit.length === 0 ? "None" : `${oldCredit.length} · ${inr(oldTotal)}`}</span>
           </label>
-          <p className="text-sm font-medium tabular-nums">{oldCredit.length === 0 ? "None" : `${oldCredit.length} · ${inr(oldTotal)}`}</p>
         </div>
+        {attention.length > 0 ? (
+          <ul className="mt-1 divide-y divide-line">
+            {attention.map((item) => (
+              <li key={item.text}>
+                <ReviewLink item={item} />
+              </li>
+            ))}
+          </ul>
+        ) : null}
         {oldCredit.length > 0 ? (
           <ul className="divide-y divide-line">
-            {oldCredit.slice(0, 8).map((line) => (
+            {oldCredit.slice(0, 3).map((line) => (
               <li key={`${line.date}-${line.customer}-${line.balance}`}>
                 <ReviewLink
                   item={{
@@ -153,16 +154,12 @@ function DeskPage() {
                 />
               </li>
             ))}
-            {oldCredit.length > 8 ? (
-              <li>
-                <ReviewLink item={{ tone: "warn", text: `${oldCredit.length - 8} more credits are older than ${warnDays} days.`, to: "/credit" }} />
-              </li>
-            ) : null}
           </ul>
         ) : null}
       </section>
+      ) : null}
 
-      <section className="mt-4 grid gap-3 sm:grid-cols-3">
+      <section className="mt-3 grid gap-2 sm:grid-cols-3 lg:mt-0 lg:grid-cols-7">
         <StatusLink
           to="/collections"
           search={{ m: month }}
@@ -193,71 +190,66 @@ function DeskPage() {
           }
           tone={mounted && shortOpen < 0 ? "bad" : mounted && excessOpen > 0 ? "warn" : "ink"}
         />
-      </section>
-
-      <section className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Stat label="Net collection" value={inr(snap.collection)} />
         <Stat label="Expenses" value={inr(snap.expense)} />
         <Stat label="Staff salary" value={inr(snap.salary)} />
-        <Stat
-          label="Margin"
-          value={inr(snap.margin)}
-          tone={snap.margin < 0 ? "bad" : "good"}
-        />
+        <Stat label="Margin" value={inr(snap.margin)} tone={snap.margin < 0 ? "bad" : "good"} />
       </section>
 
-      <section className="mt-4 grid gap-4 lg:grid-cols-5">
-        <div className="rounded-xl border border-line bg-surface p-5 lg:col-span-3">
-          <h2 className="font-display text-2xl">This year, month by month</h2>
-          <div className="print-chart relative mt-3 h-52 w-full shrink-0 overflow-hidden">
+      <section className="mt-3 grid min-h-0 gap-3 lg:mt-0 lg:grid-cols-5">
+        <div className="flex min-h-0 flex-col rounded-xl border border-line bg-surface p-4 lg:col-span-3">
+          <h2 className="font-medium">This year, month by month</h2>
+          <div className="print-chart relative mt-2 h-36 w-full min-w-0 shrink-0 overflow-hidden">
             {mounted ? (
-              <ResponsiveContainer width="100%" height={208}>
-                <BarChart data={points} barCategoryGap={8}>
-                  <XAxis dataKey="label" tick={{ fill: chartColors.faint, fontSize: 12 }} axisLine={false} tickLine={false} />
-                  <YAxis hide />
-                  <Tooltip
-                    cursor={{ fill: chartColors.line }}
-                    formatter={(value) => [inr(Number(value)), "Collection"]}
-                    contentStyle={{ border: `1px solid ${chartColors.line}`, borderRadius: 8, background: chartColors.surface }}
-                  />
-                  <Bar dataKey="amount" fill={chartColors.accent} radius={[4, 4, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
+              <ChartFrame>
+                <ResponsiveContainer width="100%" height={144} minWidth={0}>
+                  <BarChart data={points} barCategoryGap={8}>
+                    <XAxis dataKey="label" tick={{ fill: chartColors.faint, fontSize: 12 }} axisLine={false} tickLine={false} />
+                    <YAxis hide />
+                    <Tooltip
+                      cursor={{ fill: chartColors.line }}
+                      formatter={(value) => [inr(Number(value)), "Collection"]}
+                      contentStyle={{ border: `1px solid ${chartColors.line}`, borderRadius: 8, background: chartColors.surface }}
+                    />
+                    <Bar dataKey="amount" fill={chartColors.accent} radius={[4, 4, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </ChartFrame>
             ) : null}
           </div>
-          <div className="mt-4 grid gap-3 sm:grid-cols-2">
-            <Link to="/closing" search={{ d: today || `${month}-01` }} className="rounded-lg border border-line bg-bg p-4 hover:border-line-strong">
-              <CardText title="Closing" value={mounted ? closeWord.value : "—"} note="Cash, wallets and bank" />
+          <div className="mt-2 grid gap-2 sm:grid-cols-4">
+            <Link to="/closing" search={{ d: today || `${month}-01` }} className="rounded-lg border border-line bg-bg px-3 py-2 hover:border-line-strong">
+              <CardText title="Closing" value={mounted ? closeWord.value : "—"} />
             </Link>
-            <Link to="/expenses" search={{ m: month }} className="rounded-lg border border-line bg-bg p-4 hover:border-line-strong">
-              <CardText title="Expenses" value={snap.expense > 0 ? inr(snap.expense) : "—"} note="Bills for this month" />
+            <Link to="/expenses" search={{ m: month }} className="rounded-lg border border-line bg-bg px-3 py-2 hover:border-line-strong">
+              <CardText title="Expenses" value={snap.expense > 0 ? inr(snap.expense) : "—"} />
             </Link>
-            <Link to="/centre" className="rounded-lg border border-line bg-bg p-4 hover:border-line-strong">
-              <CardText title="Centre month" value={snap.collection > 0 ? inr(snap.collection) : "—"} note="Collection and margin" />
+            <Link to="/centre" className="rounded-lg border border-line bg-bg px-3 py-2 hover:border-line-strong">
+              <CardText title="Centre" value={snap.collection > 0 ? inr(snap.collection) : "—"} />
             </Link>
-            <Link to="/reports" className="rounded-lg border border-line bg-bg p-4 hover:border-line-strong">
-              <CardText title="Reports" value={inr(snap.margin)} note="Each month and each person" />
+            <Link to="/reports" className="rounded-lg border border-line bg-bg px-3 py-2 hover:border-line-strong">
+              <CardText title="Reports" value={inr(snap.margin)} />
             </Link>
           </div>
         </div>
-        <div className="rounded-xl border border-line bg-surface p-5 lg:col-span-2">
-          <h2 className="font-display text-2xl">Staff</h2>
-          <ul className="mt-3 divide-y divide-line">
-            {rows.length === 0 ? <li className="py-3 text-sm text-muted">Add staff from Salary.</li> : null}
+        <div className="flex min-h-0 flex-col rounded-xl border border-line bg-surface p-4 lg:col-span-2">
+          <h2 className="font-medium">Staff</h2>
+          <ul className="mt-1 min-h-0 divide-y divide-line overflow-y-auto">
+            {rows.length === 0 ? <li className="py-2 text-sm text-muted">Add staff from Salary.</li> : null}
             {rows.map((row) => {
               const mark = onLeave.find((item) => item.employeeId === row.employee.id);
               return (
-                <li key={row.employee.id} className="flex items-center justify-between gap-3 py-3">
+                <li key={row.employee.id} className="flex items-center justify-between gap-3 py-1.5">
                   <div>
                     <p className="text-sm font-medium">{row.employee.name}</p>
                     <p className="text-xs text-faint">{mark ? leaveWord(mark.code) : DESK_LABEL[deskOf(row.employee)]}</p>
                   </div>
-                  <p className="text-lg font-medium tabular-nums">{inr(row.collection)}</p>
+                  <p className="text-base font-medium tabular-nums">{inr(row.collection)}</p>
                 </li>
               );
             })}
           </ul>
-          <Link to="/salary" search={{ m: month }} className="mt-2 inline-flex min-h-11 items-center text-sm font-medium text-accent">
+          <Link to="/salary" search={{ m: month }} className="mt-1 inline-flex min-h-9 items-center text-sm font-medium text-accent">
             Work out salary
           </Link>
         </div>
@@ -285,10 +277,11 @@ function StatusLink({
     <Link
       to={to}
       search={search}
-      className="rounded-xl border border-line bg-surface p-5 hover:border-line-strong"
+      className="rounded-xl border border-line bg-surface px-3 py-2 hover:border-line-strong"
     >
       <p className="text-xs font-semibold tracking-widest text-faint">{label.toUpperCase()}</p>
-      <p className={cn("mt-2 font-display text-4xl tabular-nums", tone === "bad" ? "text-bad" : tone === "warn" ? "text-warn" : "text-ink")}>{value}</p>
+      <p className={cn("mt-1 font-display text-2xl tabular-nums", tone === "bad" ? "text-bad" : tone === "warn" ? "text-warn" : "text-ink")}>{value}</p>
+      <p className="text-xs text-muted">{hint}</p>
     </Link>
   );
 }
@@ -436,19 +429,18 @@ function Stat({
   tone?: "ink" | "good" | "bad";
 }) {
   return (
-    <div className="rounded-xl border border-line bg-surface p-5">
+    <div className="rounded-xl border border-line bg-surface px-3 py-2">
       <p className="text-xs font-semibold tracking-widest text-faint">{label.toUpperCase()}</p>
-      <p className={`mt-2 font-display text-4xl tabular-nums ${tone === "bad" ? "text-bad" : "text-ink"}`}>{value}</p>
+      <p className={`mt-1 font-display text-2xl tabular-nums ${tone === "bad" ? "text-bad" : "text-ink"}`}>{value}</p>
     </div>
   );
 }
 
-function CardText({ title, value, note }: { title: string; value: string; note: string }) {
+function CardText({ title, value }: { title: string; value: string }) {
   return (
     <>
       <p className="text-xs font-semibold tracking-widest text-faint">{title.toUpperCase()}</p>
-      <p className="mt-2 font-display text-3xl tabular-nums">{value}</p>
-      <p className="mt-2 text-sm text-muted">{note}</p>
+      <p className="mt-1 font-display text-xl tabular-nums">{value}</p>
     </>
   );
 }

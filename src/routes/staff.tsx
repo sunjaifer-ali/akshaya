@@ -3,6 +3,7 @@ import { useState } from "react";
 import { Bar, BarChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { MonthBar } from "@/components/month-bar";
 import { PageHeader } from "@/components/page-header";
+import { ChartFrame } from "@/components/chart-frame";
 import { StaffDialog } from "@/components/staff-dialog";
 import { ResultDialog, type Result } from "@/components/result-dialog";
 import { Button } from "@/components/ui/button";
@@ -227,9 +228,10 @@ function StaffPage() {
                 <Mini label="Pay % of their work" value={ytdCollection > 0 ? pct((ytdPay / ytdCollection) * 100) : "—"} />
                 <Mini label="Share of centre" value={centreYear > 0 ? pct((ytdCollection / centreYear) * 100) : "—"} />
               </div>
-              <div className="print-chart mt-4 h-56">
+              <div className="print-chart mt-4 h-40 min-w-0">
                 {mounted ? (
-                  <ResponsiveContainer width="100%" height="100%">
+                  <ChartFrame>
+                  <ResponsiveContainer width="100%" height="100%" minWidth={0}>
                     <BarChart data={yearVisible}>
                       <XAxis dataKey="label" tick={{ fill: chartColors.faint, fontSize: 12 }} axisLine={false} tickLine={false} />
                       <YAxis hide />
@@ -240,6 +242,7 @@ function StaffPage() {
                       <Bar dataKey="collection" fill={chartColors.accent} radius={[4, 4, 0, 0]} />
                     </BarChart>
                   </ResponsiveContainer>
+                  </ChartFrame>
                 ) : null}
               </div>
             </section>

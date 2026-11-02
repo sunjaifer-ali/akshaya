@@ -5,6 +5,7 @@ import { Bar, CartesianGrid, ComposedChart, Line, ResponsiveContainer, Tooltip, 
 import { MoneyField } from "@/components/money-field";
 import { MonthBar } from "@/components/month-bar";
 import { PageHeader } from "@/components/page-header";
+import { ChartFrame } from "@/components/chart-frame";
 import { Button } from "@/components/ui/button";
 import { chartColors } from "@/lib/chart-colors";
 import { inr, inrShort, pct, signedInr } from "@/lib/format";
@@ -179,9 +180,10 @@ function CentrePage() {
       <>
       <section className="print-chart mt-4 rounded-xl border border-line bg-surface p-5">
         <h2 className="font-display text-2xl">Collection against last year</h2>
-        <div className="mt-3 h-64">
+        <div className="mt-3 h-52 min-w-0">
           {mounted ? (
-            <ResponsiveContainer width="100%" height="100%">
+            <ChartFrame>
+            <ResponsiveContainer width="100%" height="100%" minWidth={0}>
               <ComposedChart data={chartRows}>
                 <CartesianGrid vertical={false} stroke={chartColors.line} />
                 <XAxis dataKey="label" tick={{ fill: chartColors.faint, fontSize: 12 }} axisLine={false} tickLine={false} />
@@ -195,6 +197,7 @@ function CentrePage() {
                 <Line dataKey="margin" stroke={chartColors.ink} strokeWidth={2} dot={false} />
               </ComposedChart>
             </ResponsiveContainer>
+            </ChartFrame>
           ) : null}
         </div>
       </section>
