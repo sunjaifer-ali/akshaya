@@ -23,6 +23,7 @@ function PaymentsPage() {
   const [paid, setPaid] = useState("");
   const [amount, setAmount] = useState<number | null>(null);
   const [pending, setPending] = useState(false);
+  const [openDay, setOpenDay] = useState("");
   const [result, setResult] = useState<Result | null>(null);
 
   const load = () => {
@@ -113,18 +114,28 @@ function PaymentsPage() {
         <section className="mt-4">
           <h2 className="font-medium">This month</h2>
           <p className="mt-1 text-sm text-muted">{inr(monthTotal)} paid out, including today.</p>
-          {earlierDays.map((day) => (
-            <div key={day} className="mt-3">
-              <h3 className="text-xs font-semibold tracking-widest text-faint">{formatDay(day)}</h3>
-              <ul className="mt-1 divide-y divide-line rounded-xl border border-line bg-surface">
-                {monthRows
-                  .filter((row) => row.date === day)
-                  .map((row) => (
-                    <PaymentLine key={row.id} row={row} canRemove={canRemove(row)} onRemove={() => remove(row.id)} />
-                  ))}
-              </ul>
-            </div>
-          ))}
+          <ul className="mt-3 divide-y divide-line rounded-xl border border-line bg-surface">
+            {earlierDays.map((day) => {
+              const rows = monthRows.filter((row) => row.date === day);
+              const dayTotal = rows.reduce((sum, row) => sum + row.amount, 0);
+              const open = openDay === day;
+              return (
+                <li key={day}>
+                  <button type="button" className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left text-sm" onClick={() => setOpenDay(open ? "" : day)}>
+                    <span className="font-medium">{formatDay(day)}</span>
+                    <span className="tabular-nums">{inr(dayTotal)}</span>
+                  </button>
+                  {open ? (
+                    <ul className="divide-y divide-line border-t border-line">
+                      {rows.map((row) => (
+                        <PaymentLine key={row.id} row={row} canRemove={canRemove(row)} onRemove={() => remove(row.id)} />
+                      ))}
+                    </ul>
+                  ) : null}
+                </li>
+              );
+            })}
+          </ul>
         </section>
       ) : null}
       <ResultDialog result={result} onClose={() => setResult(null)} />

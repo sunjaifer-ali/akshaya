@@ -156,7 +156,7 @@ function ReportsPage() {
       {kind === "logins" ? (
         <LoginStatement date={logDate} />
       ) : kind === "transfers" ? (
-        <TransferStatement fy={fy} closes={book.cashCloses} />
+        <TransferStatement fy={fy} closes={book.cashCloses} anchor={anchor} />
       ) : shown.length === 0 ? (
         <p className="rounded-xl border border-line bg-surface p-5 text-sm text-muted">Nothing entered for {fyLabel(fy)}.</p>
       ) : kind === "centre" ? (
@@ -757,69 +757,87 @@ function AttendanceCell({ item }: { item: MonthAttendance }) {
   );
 }
 
-function TransferStatement({ fy, closes }: { fy: number; closes: { date: string; profitTaken?: number; profitNote?: string; cashIn?: number; cashInNote?: string }[] }) {
+function TransferStatement({
+  fy,
+  closes,
+  anchor,
+}: {
+  fy: number;
+  closes: { date: string; profitTaken?: number; profitNote?: string; cashIn?: number; cashInNote?: string }[];
+  anchor: string;
+}) {
   const months = fyMonths(fy);
-  const lines = closes
-    .filter((item) => months.includes(item.date.slice(0, 7)) && (item.profitTaken ?? 0) > 0)
-    .sort((a, b) => (a.date < b.date ? -1 : 1));
-  const added = closes
-    .filter((item) => months.includes(item.date.slice(0, 7)) && (item.cashIn ?? 0) > 0)
-    .sort((a, b) => (a.date < b.date ? -1 : 1));
-  const total = lines.reduce((sum, item) => sum + (item.profitTaken ?? 0), 0);
-  const addedTotal = added.reduce((sum, item) => sum + (item.cashIn ?? 0), 0);
-  const byMonth = months
+  const summary = months
     .map((month) => {
-      const rows = lines.filter((item) => item.date.startsWith(month));
-      const amount = rows.reduce((sum, item) => sum + (item.profitTaken ?? 0), 0);
-      return { month, rows, amount };
+      const rows = closes.filter((item) => item.date.startsWith(month));
+      const out = rows.reduce((sum, item) => sum + (item.profitTaken ?? 0), 0);
+      const inn = rows.reduce((sum, item) => sum + (item.cashIn ?? 0), 0);
+      return { month, out, inn };
     })
-    .filter((item) => item.amount > 0);
-  if (lines.length === 0 && added.length === 0) return <p className="rounded-xl border border-line bg-surface p-5 text-sm text-muted">No transfer in {fyLabel(fy)}.</p>;
+    .filter((item) => item.out > 0 || item.inn > 0);
+  const [picked, setPicked] = useState("");
+  const openMonth = months.includes(picked) ? picked : (summary.find((item) => item.month === anchor)?.month ?? summary.at(-1)?.month ?? "");
+  const days = closes
+    .filter((item) => item.date.startsWith(openMonth) && ((item.profitTaken ?? 0) > 0 || (item.cashIn ?? 0) > 0))
+    .sort((a, b) => (a.date < b.date ? -1 : 1));
+  const outTotal = summary.reduce((sum, item) => sum + item.out, 0);
+  const inTotal = summary.reduce((sum, item) => sum + item.inn, 0);
+  if (summary.length === 0) return <p className="rounded-xl border border-line bg-surface p-5 text-sm text-muted">No transfer in {fyLabel(fy)}.</p>;
   return (
     <div className="grid gap-4">
-      <section className="rounded-xl border border-line bg-surface p-5">
-        <div className="flex flex-wrap items-end justify-between gap-3">
-          <h2 className="font-display text-2xl">Transferred</h2>
-          <p className="font-display text-3xl tabular-nums">{inr(total)}</p>
+      <section className="grid gap-3 sm:grid-cols-2">
+        <div className="rounded-xl border border-line bg-surface p-5">
+          <p className="text-xs font-semibold tracking-widest text-faint">TRANSFERRED</p>
+          <p className="mt-1 font-display text-3xl tabular-nums">{inr(outTotal)}</p>
         </div>
-        {byMonth.map((group) => (
-          <div key={group.month} className="mt-4">
-            <div className="flex items-baseline justify-between gap-3">
-              <h3 className="text-sm font-medium">{formatMonthShort(group.month)}</h3>
-              <p className="tabular-nums">{inr(group.amount)}</p>
-            </div>
-            <ul className="mt-1 divide-y divide-line">
-              {group.rows.map((item) => (
-                <li key={item.date} className="flex items-center justify-between gap-3 py-2 text-sm">
-                  <span>
-                    {formatDay(item.date)}
-                    {item.profitNote ? <span className="mt-0.5 block text-xs text-faint">{item.profitNote}</span> : null}
-                  </span>
-                  <span className="tabular-nums">{inr(item.profitTaken ?? 0)}</span>
-                </li>
-              ))}
-            </ul>
-          </div>
-        ))}
-      </section>
-      <section className="rounded-xl border border-line bg-surface p-5">
-        <div className="flex flex-wrap items-end justify-between gap-3">
-          <h2 className="font-display text-2xl">Cash in</h2>
-          <p className="font-display text-3xl tabular-nums">{inr(addedTotal)}</p>
+        <div className="rounded-xl border border-line bg-surface p-5">
+          <p className="text-xs font-semibold tracking-widest text-faint">CASH IN</p>
+          <p className="mt-1 font-display text-3xl tabular-nums">{inr(inTotal)}</p>
         </div>
-        {added.length === 0 ? <p className="mt-2 text-sm text-muted">No money added from your bank.</p> : null}
-        <ul className="mt-1 divide-y divide-line">
-          {added.map((item) => (
-            <li key={item.date} className="flex items-center justify-between gap-3 py-2 text-sm">
-              <span>
-                {formatDay(item.date)}
-                {item.cashInNote ? <span className="mt-0.5 block text-xs text-faint">{item.cashInNote}</span> : null}
-              </span>
-              <span className="tabular-nums">{inr(item.cashIn ?? 0)}</span>
-            </li>
-          ))}
-        </ul>
       </section>
+      <section className="overflow-hidden rounded-xl border border-line bg-surface">
+        <table className="w-full text-left text-sm">
+          <thead className="text-xs tracking-wide text-faint">
+            <tr className="border-b border-line">
+              <th className="px-4 py-3 font-medium">Month</th>
+              <th className="px-4 py-3 text-right font-medium">Transferred</th>
+              <th className="px-4 py-3 text-right font-medium">Cash in</th>
+            </tr>
+          </thead>
+          <tbody>
+            {summary.map((item) => (
+              <tr
+                key={item.month}
+                className={cn("cursor-pointer border-b border-line last:border-0", item.month === openMonth && "bg-surface-2")}
+                onClick={() => setPicked(item.month)}
+              >
+                <th className="px-4 py-3 text-left font-medium">{formatMonthShort(item.month)}</th>
+                <td className="px-4 py-3 text-right tabular-nums">{item.out > 0 ? inr(item.out) : "—"}</td>
+                <td className="px-4 py-3 text-right tabular-nums">{item.inn > 0 ? inr(item.inn) : "—"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </section>
+      {openMonth ? (
+        <section className="rounded-xl border border-line bg-surface p-5">
+          <h2 className="font-medium">{formatMonthShort(openMonth)}</h2>
+          <ul className="mt-2 divide-y divide-line">
+            {days.map((item) => (
+              <li key={item.date} className="flex items-center justify-between gap-3 py-2 text-sm">
+                <span>
+                  {formatDay(item.date)}
+                  {item.profitNote || item.cashInNote ? <span className="mt-0.5 block text-xs text-faint">{item.profitNote || item.cashInNote}</span> : null}
+                </span>
+                <span className="text-right tabular-nums">
+                  {(item.profitTaken ?? 0) > 0 ? <span className="block">{inr(item.profitTaken ?? 0)}</span> : null}
+                  {(item.cashIn ?? 0) > 0 ? <span className="block text-muted">In {inr(item.cashIn ?? 0)}</span> : null}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
     </div>
   );
 }

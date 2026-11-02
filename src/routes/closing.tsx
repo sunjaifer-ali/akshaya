@@ -133,8 +133,9 @@ function ClosingPage() {
     return item;
   });
   const lines = accountLines(lined, daysForClose, book.holidays, payouts);
-  const shorts = lines.filter((line) => line.unfixed < 0);
-  const excesses = lines.filter((line) => line.unfixed > 0);
+  const monthLines = lines.filter((line) => line.date.slice(0, 7) === date.slice(0, 7));
+  const shorts = monthLines.filter((line) => line.unfixed < 0);
+  const excesses = monthLines.filter((line) => line.unfixed > 0);
   const shortTotal = shorts.reduce((sum, line) => sum + -line.unfixed, 0);
   const excessTotal = excesses.reduce((sum, line) => sum + line.unfixed, 0);
   const go = (next: string) => {

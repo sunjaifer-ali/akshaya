@@ -62,7 +62,9 @@ function DeskPage() {
       amount: monthCollection(book.days, item),
     }));
 
-  const lines = accountLines(book.cashCloses, book.days, book.holidays, book.payouts ?? []).filter((line) => line.unfixed !== 0);
+  const lines = accountLines(book.cashCloses, book.days, book.holidays, book.payouts ?? []).filter(
+    (line) => line.unfixed !== 0 && line.date.startsWith(month),
+  );
   const shortOpen = lines.filter((line) => line.unfixed < 0).reduce((sum, line) => sum + line.unfixed, 0);
   const excessOpen = lines.filter((line) => line.unfixed > 0).reduce((sum, line) => sum + line.unfixed, 0);
   const imported = today ? aewsCollection(book.days, today) : null;
@@ -372,14 +374,14 @@ function morningReview(
       const who = close.countedBy ? ` Counted by ${close.countedBy}.` : "";
       if (check.missing.length > 0) {
         items.push({ tone: "warn", text: `Yesterday’s closing is waiting for the counter.${who}`, to: "/closing", search: { d: yesterday } });
-      } else if ((check.unfixed ?? 0) < 0) {
+      } else if (yesterday.slice(0, 7) === today.slice(0, 7) && (check.unfixed ?? 0) < 0) {
         items.push({
           tone: "bad",
           text: `Yesterday was short by ${inr(Math.abs(check.unfixed ?? 0))}.${who}`,
           to: "/closing",
           search: { d: yesterday },
         });
-      } else if ((check.unfixed ?? 0) > 0) {
+      } else if (yesterday.slice(0, 7) === today.slice(0, 7) && (check.unfixed ?? 0) > 0) {
         items.push({ tone: "warn", text: `Yesterday was excess by ${inr(check.unfixed ?? 0)}.${who}`, to: "/closing", search: { d: yesterday } });
       }
     }

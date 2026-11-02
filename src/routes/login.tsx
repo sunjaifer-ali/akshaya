@@ -95,8 +95,8 @@ function LoginPage() {
         }}
       >
         <img src="/akshaya-logo.png" alt="Akshaya" width="112" height="89" className="mx-auto mb-4 h-auto w-28" />
-        <p className="text-center text-xs font-semibold tracking-widest text-accent">AKSHAYA</p>
-        <h1 className="text-center font-display text-4xl leading-tight">Thrikkadeeri</h1>
+        <h1 className="text-center font-display text-5xl leading-tight text-accent">Akshaya</h1>
+        <p className="mt-1 text-center text-lg text-muted">Thrikkadeeri</p>
         <p className="mt-2 text-center text-sm text-muted">
           {mode === "create"
             ? "Create the admin account. Staff and closing accounts are added later from Settings."

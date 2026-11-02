@@ -78,7 +78,6 @@ const MORE_LABEL: Record<(typeof NAV)[number]["to"], string> = {
 
 export function Shell({ children }: { children: ReactNode }) {
   const pathname = useRouterState({ select: (state) => state.location.pathname });
-  const centreName = useLedger((state) => state.centreName);
   const sample = useLedger((state) => state.sample);
   const sampleBanner = useLedger((state) => state.sampleBanner);
   const dismissSample = useLedger((state) => state.dismissSample);
@@ -226,8 +225,8 @@ export function Shell({ children }: { children: ReactNode }) {
           className="block shrink-0 border-b border-line px-4 pb-4 pt-5 text-center"
         >
           <img src="/akshaya-logo.png" alt="" width="64" height="51" className="mx-auto h-auto w-16" />
-          <p className="mt-2 font-display text-2xl leading-none text-ink">Thrikkadeeri</p>
-          <p className="mt-1 text-xs tracking-wide text-faint">Centre book</p>
+          <p className="mt-2 font-display text-2xl leading-none text-accent">Akshaya</p>
+          <p className="mt-1 text-sm text-muted">Thrikkadeeri</p>
           {role === "employee" && user?.displayName ? <p className="mt-2 text-sm font-medium text-accent">{user.displayName}</p> : null}
         </Link>
         <nav className="flex min-h-0 flex-1 flex-col overflow-y-auto px-3 py-3">
@@ -289,8 +288,8 @@ export function Shell({ children }: { children: ReactNode }) {
           <Link to={role === "employee" ? "/counter" : role === "closer" ? "/closing" : "/"} aria-label={role === "employee" ? "Counter" : role === "closer" ? "Closing" : "Desk"} className="flex min-w-0 items-center gap-2">
             <img src="/akshaya-logo.png" alt="" width="36" height="29" className="h-9 w-auto shrink-0" />
             <div className="min-w-0">
-              <p className="text-xs font-semibold tracking-widest text-accent">AKSHAYA</p>
-              <p className="truncate font-display text-lg leading-none">{shortName(centreName)}</p>
+              <p className="truncate font-display text-lg leading-none text-accent">Akshaya</p>
+              <p className="text-sm text-muted">Thrikkadeeri</p>
             </div>
           </Link>
           {role === "admin" ? (
@@ -381,23 +380,23 @@ export function Shell({ children }: { children: ReactNode }) {
       {more ? (
         <div className="no-print fixed inset-0 z-40 md:hidden">
           <button type="button" className="absolute inset-0 bg-ink/30" aria-label="Close menu" onClick={() => setMore(false)} />
-          <div className="safe-bottom absolute inset-x-0 bottom-0 rounded-t-xl border border-line bg-surface p-4">
-            <p className="mb-2 text-xs font-semibold tracking-widest text-faint">MORE</p>
-            <div className="grid gap-3">
+          <div className="safe-bottom absolute inset-x-0 bottom-0 max-h-[85dvh] overflow-y-auto rounded-t-xl border border-line bg-surface p-4">
+            <p className="mb-3 text-base font-semibold text-accent">More</p>
+            <div className="grid gap-4">
               {GROUPS.map((group) => {
                 const items = NAV.filter((item) => !item.mobile && item.group === group);
                 if (items.length === 0) return null;
                 return (
                   <div key={group}>
-                    <p className="px-2 pb-1 text-[10px] font-semibold tracking-[0.16em] text-faint">{group.toUpperCase()}</p>
+                    <p className="px-3 pb-1 text-sm font-semibold text-accent">{group}</p>
                     {items.map((item) => (
                       <Link
                         key={item.to}
                         to={item.to}
                         onClick={() => setMore(false)}
-                        className="flex min-h-11 items-center gap-3 rounded-md px-2 text-sm hover:bg-surface-2"
+                        className="flex min-h-14 items-center gap-3 rounded-md px-3 text-base font-medium hover:bg-surface-2"
                       >
-                        <item.icon className="size-4 text-accent" />
+                        <item.icon className="size-5 text-accent" />
                         {MORE_LABEL[item.to]}
                       </Link>
                     ))}
@@ -447,8 +446,4 @@ function NavLink({
 function isActive(pathname: string, to: string): boolean {
   if (to === "/") return pathname === "/";
   return pathname === to || pathname.startsWith(`${to}/`);
-}
-
-function shortName(name: string): string {
-  return name.replace(/^Akshaya Centre\s+/i, "") || name;
 }
