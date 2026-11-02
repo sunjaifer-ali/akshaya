@@ -222,7 +222,7 @@ export function Shell({ children }: { children: ReactNode }) {
         <Link
           to={role === "employee" ? "/counter" : role === "closer" ? "/closing" : "/"}
           aria-label={role === "employee" ? "Counter" : role === "closer" ? "Closing" : "Desk"}
-          className="block shrink-0 border-b border-line px-4 pb-4 pt-5 text-center"
+          className="block shrink-0 border-b border-line bg-accent-soft px-4 pb-4 pt-5 text-center"
         >
           <img src="/akshaya-logo.png" alt="" width="64" height="51" className="mx-auto h-auto w-16" />
           <p className="mt-2 font-display text-2xl leading-none text-accent">Akshaya</p>
@@ -284,7 +284,7 @@ export function Shell({ children }: { children: ReactNode }) {
       </aside>
 
       <div className="print-shell md:pl-56">
-        <header className="no-print sticky top-0 z-20 flex items-center justify-between gap-3 border-b border-line bg-bg/95 px-4 py-3 backdrop-blur md:hidden">
+        <header className="no-print sticky top-0 z-20 flex items-center justify-between gap-3 border-b border-line bg-surface/95 px-4 py-3 shadow-sm backdrop-blur md:hidden">
           <Link to={role === "employee" ? "/counter" : role === "closer" ? "/closing" : "/"} aria-label={role === "employee" ? "Counter" : role === "closer" ? "Closing" : "Desk"} className="flex min-w-0 items-center gap-2">
             <img src="/akshaya-logo.png" alt="" width="36" height="29" className="h-9 w-auto shrink-0" />
             <div className="min-w-0">
@@ -432,13 +432,13 @@ function NavLink({
     <Link
       to={to}
       className={cn(
-        "flex min-h-9 items-center gap-3 rounded-md px-3 text-sm",
-        active ? "bg-accent-soft font-medium text-accent" : "text-ink hover:bg-surface-2",
+        "flex min-h-10 items-center gap-3 rounded-md px-3 text-sm",
+        active ? "bg-accent font-medium text-accent-ink" : "text-ink hover:bg-surface-2",
       )}
     >
-      <Icon className={cn("size-4", active ? "text-accent" : "text-muted")} />
+      <Icon className={cn("size-4", active ? "text-accent-ink" : "text-muted")} />
       <span className="min-w-0 flex-1">{label}</span>
-      {badge > 0 ? <span className="rounded-full bg-accent px-2 py-0.5 text-[10px] font-medium text-accent-ink">New</span> : null}
+      {badge > 0 ? <span className={cn("rounded-full px-2 py-0.5 text-[10px] font-medium", active ? "bg-white text-accent" : "bg-accent text-accent-ink")}>New</span> : null}
     </Link>
   );
 }

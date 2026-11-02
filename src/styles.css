@@ -1,17 +1,17 @@
 @import "tailwindcss";
 
 @theme {
-  --color-bg: #e7f2fb;
-  --color-surface: #f8fbfe;
-  --color-surface-2: #d7e8f6;
-  --color-ink: #102a4c;
-  --color-muted: #3e5874;
-  --color-faint: #5d7590;
+  --color-bg: #d4e7f6;
+  --color-surface: #ffffff;
+  --color-surface-2: #e7f3fb;
+  --color-ink: #0d2748;
+  --color-muted: #3a5570;
+  --color-faint: #5a728c;
   --color-line: #c5d9ec;
-  --color-line-strong: #9bb8d4;
-  --color-accent: #1a4f9c;
+  --color-line-strong: #8aafd0;
+  --color-accent: #154a96;
   --color-accent-ink: #f7fbff;
-  --color-accent-soft: #d9ebf8;
+  --color-accent-soft: #d7e9f8;
   --color-warn: #8a5a12;
   --color-warn-soft: #f6edd9;
   --color-bad: #8d3a32;
@@ -44,7 +44,10 @@
   body {
     margin: 0;
     min-height: 100dvh;
-    background: var(--color-bg);
+    background:
+      radial-gradient(720px 280px at 100% -40px, #9ec4e8 0%, transparent 55%),
+      radial-gradient(640px 320px at -10% 0%, #ffffff 0%, transparent 50%),
+      var(--color-bg);
     color: var(--color-ink);
     font-family: var(--font-sans);
     font-size: 1rem;
@@ -70,6 +73,13 @@
   select,
   textarea {
     font: inherit;
+    background-color: #fff;
+  }
+
+  input:focus,
+  select:focus,
+  textarea:focus {
+    box-shadow: 0 0 0 3px color-mix(in oklab, var(--color-accent) 16%, transparent);
   }
 }
 
@@ -77,8 +87,17 @@
   padding-bottom: env(safe-area-inset-bottom);
 }
 
-.bg-surface.rounded-xl {
-  box-shadow: 0 1px 2px color-mix(in oklab, var(--color-ink) 4%, transparent);
+.bg-surface.rounded-xl,
+.bg-surface.rounded-lg {
+  box-shadow:
+    inset 0 3px 0 #154a96,
+    0 10px 24px color-mix(in oklab, #154a96 10%, transparent);
+}
+
+nav.fixed {
+  background: color-mix(in oklab, white 94%, transparent);
+  backdrop-filter: blur(10px);
+  box-shadow: 0 -6px 18px color-mix(in oklab, #102a4c 8%, transparent);
 }
 
 .modal-panel {
@@ -143,6 +162,11 @@
     overflow: visible !important;
     height: auto !important;
     min-height: 0 !important;
+  }
+
+  .bg-surface.rounded-xl,
+  .bg-surface.rounded-lg {
+    box-shadow: none !important;
   }
 
   .no-print,

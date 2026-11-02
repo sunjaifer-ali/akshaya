@@ -62,7 +62,7 @@ function PaymentsPage() {
       </section>
       {locked ? <p className="mb-4 text-sm text-muted">This day is closed. A new day starts tomorrow.</p> : null}
       <form
-        className="grid gap-3 rounded-xl border border-line bg-surface p-5 sm:grid-cols-2"
+        className="flex flex-wrap items-end gap-2 rounded-xl border border-line bg-surface p-3"
         onSubmit={(event) => {
           event.preventDefault();
           if (!date || locked) return;
@@ -83,26 +83,20 @@ function PaymentsPage() {
             .finally(() => setPending(false));
         }}
       >
-        <label className="block text-sm">
-          <span className="mb-1 block text-muted">What was paid</span>
-          <input
-            aria-label="What was paid"
-            className="h-11 w-full rounded-sm border border-line bg-bg px-3 text-base outline-none focus:border-accent disabled:bg-surface-2"
-            value={paid}
-            disabled={locked}
-            placeholder="eg. tea, stationery, donation"
-            onChange={(event) => setPaid(event.target.value.slice(0, 80))}
-          />
-        </label>
-        <label className="block text-sm">
-          <span className="mb-1 block text-muted">Amount</span>
+        <input
+          aria-label="What was paid"
+          className="h-12 min-w-40 flex-1 rounded-sm border border-line bg-bg px-3 text-base outline-none focus:border-accent disabled:bg-surface-2"
+          value={paid}
+          disabled={locked}
+          placeholder="Tea, stationery…"
+          onChange={(event) => setPaid(event.target.value.slice(0, 80))}
+        />
+        <div className="w-32">
           <MoneyField label="Amount paid" value={amount} disabled={locked} onChange={setAmount} />
-        </label>
-        <div className="sm:col-span-2">
-          <Button type="submit" disabled={locked || pending}>
-            Add payment
-          </Button>
         </div>
+        <Button type="submit" className="min-h-12" disabled={locked || pending}>
+          Add
+        </Button>
       </form>
       <ul className="mt-4 divide-y divide-line rounded-xl border border-line bg-surface">
         {todayRows.length === 0 ? <li className="px-4 py-4 text-sm text-muted">Nothing paid out today.</li> : null}

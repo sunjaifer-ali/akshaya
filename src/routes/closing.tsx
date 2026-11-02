@@ -234,19 +234,18 @@ function ClosingPage() {
       </p>
 
       {role === "admin" ? (
-        <section className="mx-auto mt-3 max-w-lg rounded-xl border border-line bg-surface p-4">
-          <div className="flex items-baseline justify-between gap-3">
-            <h2 className="font-medium">Cash in</h2>
-            <p className="tabular-nums">{inr(cashLines.reduce((sum, item) => sum + item.amount, 0))}</p>
+        <section className="mx-auto mt-3 max-w-lg rounded-xl border border-line bg-surface px-3 py-3">
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="text-sm font-medium">Cash in</h2>
+            <p className="text-sm tabular-nums">{inr(cashLines.reduce((sum, item) => sum + item.amount, 0))}</p>
           </div>
-          <p className="mt-1 text-sm text-muted">Add each amount from your own bank. This can be more than once. It does not close the day.</p>
           {cashLines.length > 0 ? (
-            <ul className="mt-3 divide-y divide-line">
+            <ul className="mt-2 divide-y divide-line">
               {cashLines.map((item, index) => (
-                <li key={`${item.note}-${item.amount}-${index}`} className="flex items-center justify-between gap-3 py-2 text-sm">
+                <li key={`${item.note}-${item.amount}-${index}`} className="flex items-center justify-between gap-3 py-1.5 text-sm">
                   <span>
                     {inr(item.amount)}
-                    {item.note ? <span className="mt-0.5 block text-xs text-faint">{item.note}</span> : null}
+                    {item.note ? <span className="text-muted"> · {item.note}</span> : null}
                   </span>
                   {locked ? null : (
                     <Button
@@ -256,7 +255,7 @@ function ClosingPage() {
                         const lines = cashLines.filter((_, itemIndex) => itemIndex !== index);
                         remember(
                           { cashIns: lines, cashIn: lines.reduce((sum, line) => sum + line.amount, 0), cashInNote: lines.map((line) => line.note).filter(Boolean).join(", ").slice(0, 80) },
-                          "Cash in removed. The day stays open.",
+                          "Cash in removed.",
                         );
                       }}
                     >
@@ -268,76 +267,68 @@ function ClosingPage() {
             </ul>
           ) : null}
           {locked ? null : (
-            <div className="mt-3 grid gap-3 sm:grid-cols-2">
-              <Field label="Amount added">
-                <MoneyField label="Amount added" value={cashAmount} onChange={setCashAmount} />
-              </Field>
-              <label className="block text-sm">
-                <span className="mb-1 block text-muted">From</span>
-                <input
-                  className="h-11 w-full rounded-sm border border-line bg-bg px-3 text-base outline-none focus:border-accent"
-                  value={cashFrom}
-                  placeholder="Own bank"
-                  onChange={(event) => setCashFrom(event.target.value.slice(0, 80))}
-                />
-              </label>
-              <div className="sm:col-span-2">
-                <Button
-                  onClick={() => {
-                    const amount = cashAmount ?? 0;
-                    if (amount <= 0) {
-                      setResult({ ok: false, message: "Enter the cash in amount." });
-                      return;
-                    }
-                    const lines = [...cashLines, { amount, note: cashFrom.trim() }];
-                    remember(
-                      { cashIns: lines, cashIn: lines.reduce((sum, line) => sum + line.amount, 0), cashInNote: lines.map((line) => line.note).filter(Boolean).join(", ").slice(0, 80) },
-                      "Cash in saved. The day stays open.",
-                    );
-                    setCashAmount(null);
-                    setCashFrom("");
-                  }}
-                >
-                  Add
-                </Button>
+            <div className="mt-2 flex flex-wrap items-end gap-2">
+              <div className="w-32">
+                <MoneyField label="Cash in amount" value={cashAmount} onChange={setCashAmount} />
               </div>
+              <input
+                aria-label="Cash in from"
+                className="h-11 min-w-32 flex-1 rounded-sm border border-line bg-bg px-3 text-base outline-none focus:border-accent"
+                value={cashFrom}
+                placeholder="From"
+                onChange={(event) => setCashFrom(event.target.value.slice(0, 80))}
+              />
+              <Button
+                onClick={() => {
+                  const amount = cashAmount ?? 0;
+                  if (amount <= 0) {
+                    setResult({ ok: false, message: "Enter the cash in amount." });
+                    return;
+                  }
+                  const lines = [...cashLines, { amount, note: cashFrom.trim() }];
+                  remember(
+                    { cashIns: lines, cashIn: lines.reduce((sum, line) => sum + line.amount, 0), cashInNote: lines.map((line) => line.note).filter(Boolean).join(", ").slice(0, 80) },
+                    "Cash in saved.",
+                  );
+                  setCashAmount(null);
+                  setCashFrom("");
+                }}
+              >
+                Add
+              </Button>
             </div>
           )}
         </section>
       ) : null}
 
       {role === "admin" ? (
-        <section className="mx-auto mt-3 max-w-lg rounded-xl border border-line bg-surface p-4">
-          <h2 className="font-medium">Transfer to self or other accounts</h2>
-          <p className="mt-1 text-sm text-muted">Enter this before the count. Saving it does not close the day.</p>
-          <div className="mt-3 grid gap-3 sm:grid-cols-2">
-            <Field label="Amount transferred">
+        <section className="mx-auto mt-2 max-w-lg rounded-xl border border-line bg-surface px-3 py-3">
+          <h2 className="text-sm font-medium">Transfer to self</h2>
+          <div className="mt-2 flex flex-wrap items-end gap-2">
+            <div className="w-32">
               <MoneyField label="Amount transferred" value={transferAmount} disabled={locked} onChange={setTransferAmount} />
-            </Field>
-            <label className="block text-sm">
-              <span className="mb-1 block text-muted">Account</span>
-              <input
-                className="h-11 w-full rounded-sm border border-line bg-bg px-3 text-base outline-none focus:border-accent disabled:opacity-70"
-                value={transferAccount}
-                disabled={locked}
-                placeholder="Own account"
-                onChange={(event) => setTransferAccount(event.target.value.slice(0, 80))}
-              />
-            </label>
+            </div>
+            <input
+              aria-label="Transfer account"
+              className="h-11 min-w-32 flex-1 rounded-sm border border-line bg-bg px-3 text-base outline-none focus:border-accent disabled:opacity-70"
+              value={transferAccount}
+              disabled={locked}
+              placeholder="Account"
+              onChange={(event) => setTransferAccount(event.target.value.slice(0, 80))}
+            />
+            {locked ? null : (
+              <Button
+                onClick={() => {
+                  remember(
+                    { profitTaken: transferAmount ?? 0, profitNote: transferAccount.trim() },
+                    "Transfer saved.",
+                  );
+                }}
+              >
+                Save
+              </Button>
+            )}
           </div>
-          {locked ? null : (
-            <Button
-              className="no-print mt-3"
-              onClick={() => {
-                remember(
-                  { profitTaken: transferAmount ?? 0, profitNote: transferAccount.trim() },
-                  "Transfer saved. The day stays open.",
-                );
-              }}
-            >
-              Save
-            </Button>
-          )}
         </section>
       ) : null}
 
@@ -352,7 +343,7 @@ function ClosingPage() {
                 <input
                   aria-label={`${note.face} rupee notes`}
                   inputMode="numeric"
-                  className="h-10 w-14 rounded-sm border border-line bg-bg px-2 text-base tabular-nums outline-none focus:border-accent"
+                  className="h-12 w-16 rounded-sm border border-line bg-bg px-2 text-base tabular-nums outline-none focus:border-accent"
                   value={count ? String(count) : ""}
                   placeholder="0"
                   readOnly={!editing}

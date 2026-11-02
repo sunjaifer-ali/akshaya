@@ -88,13 +88,15 @@ function LoginPage() {
   return (
     <main className="mx-auto flex min-h-dvh w-full max-w-sm flex-col items-center justify-center px-4 py-10">
       <form
-        className="w-full rounded-xl border border-line bg-surface px-6 py-8"
+        className="w-full rounded-xl border border-line bg-surface px-6 py-8 shadow-lg"
         onSubmit={(event) => {
           event.preventDefault();
           void submit();
         }}
       >
-        <img src="/akshaya-logo.png" alt="Akshaya" width="112" height="89" className="mx-auto mb-4 h-auto w-28" />
+        <div className="mx-auto mb-4 flex h-28 w-28 items-center justify-center rounded-full bg-accent-soft">
+          <img src="/akshaya-logo.png" alt="Akshaya" width="112" height="89" className="h-auto w-20" />
+        </div>
         <h1 className="text-center font-display text-5xl leading-tight text-accent">Akshaya</h1>
         <p className="mt-1 text-center text-lg text-muted">Thrikkadeeri</p>
         <p className="mt-2 text-center text-sm text-muted">

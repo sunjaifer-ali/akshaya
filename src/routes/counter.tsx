@@ -1,9 +1,8 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRefresh } from "@/lib/use-refresh";
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
-import { Modal } from "@/components/ui/modal";
 import { ResultDialog, type Result } from "@/components/result-dialog";
 import { addAdvance, addCustomerMove, addServiceEntry, advanceDesk, customerCreditDesk, giveAdvanceService, removeServiceEntry, serviceDay, updateServiceEntry, type OpenAdvance, type OpenCredit, type ServiceLine } from "@/lib/centre.functions";
 import { inr } from "@/lib/format";
@@ -33,7 +32,6 @@ function CounterPage() {
   const [department, setDepartment] = useState("");
   const [payMode, setPayMode] = useState<"cash" | "gpay" | "mixed">("cash");
   const [cashPart, setCashPart] = useState("");
-  const [askGpay, setAskGpay] = useState(false);
   const [notice, setNotice] = useState("");
   const [result, setResult] = useState<Result | null>(null);
   const [pending, setPending] = useState(false);
@@ -41,6 +39,7 @@ function CounterPage() {
   const [editing, setEditing] = useState<ServiceLine | null>(null);
   const [panel, setPanel] = useState<"live" | "credit" | "advance">("live");
   const [showCustomers, setShowCustomers] = useState(false);
+  const serviceRef = useRef<HTMLInputElement>(null);
   const day = date || today || "";
 
   useEffect(() => {
@@ -96,6 +95,7 @@ function CounterPage() {
         setNotice("");
         setEditing(null);
         setResult({ ok: true, message: "Charge successfully saved." });
+        serviceRef.current?.focus();
         return reload();
       })
       .catch((error: unknown) => {
@@ -197,46 +197,44 @@ function CounterPage() {
             save();
           }}
         >
-          <label className="block text-sm">
-            <span className="mb-1 block font-medium text-ink">Service</span>
-            <input
-              list="akshaya-services"
-              className="h-11 w-full rounded-sm border border-line bg-bg px-3 text-base outline-none focus:border-accent"
-              value={service}
-              onChange={(event) => setService(event.target.value)}
-            />
-            <datalist id="akshaya-services">
-              {SERVICES.map((item) => (
-                <option key={item} value={item} />
-              ))}
-            </datalist>
-          </label>
-          <label className="block text-sm">
-            <span className="mb-1 block font-medium text-ink">Customer name</span>
-            <input
-              className="h-11 w-full rounded-sm border border-line bg-bg px-3 text-base outline-none focus:border-accent"
-              value={customer}
-              onChange={(event) => setCustomer(event.target.value)}
-            />
-          </label>
-          <label className="block text-sm">
-            <span className="mb-1 block font-medium text-ink">Mobile, if any</span>
-            <input
-              inputMode="numeric"
-              className="h-11 w-full rounded-sm border border-line bg-bg px-3 text-base outline-none focus:border-accent"
-              value={mobile}
-              onChange={(event) => setMobile(event.target.value)}
-            />
-          </label>
-          <label className="block text-sm">
-            <span className="mb-1 block font-medium text-ink">Service charge</span>
-            <input
-              inputMode="numeric"
-              className="h-11 w-full rounded-sm border border-line bg-bg px-3 text-base outline-none focus:border-accent"
-              value={amount}
-              onChange={(event) => setAmount(event.target.value)}
-            />
-          </label>
+          <input
+            ref={serviceRef}
+            list="akshaya-services"
+            aria-label="Service"
+            placeholder="Service"
+            autoFocus
+            className="h-12 w-full rounded-sm border border-line bg-bg px-3 text-base outline-none focus:border-accent"
+            value={service}
+            onChange={(event) => setService(event.target.value)}
+          />
+          <datalist id="akshaya-services">
+            {SERVICES.map((item) => (
+              <option key={item} value={item} />
+            ))}
+          </datalist>
+          <input
+            aria-label="Customer name"
+            placeholder="Customer"
+            className="h-12 w-full rounded-sm border border-line bg-bg px-3 text-base outline-none focus:border-accent"
+            value={customer}
+            onChange={(event) => setCustomer(event.target.value)}
+          />
+          <input
+            aria-label="Mobile"
+            placeholder="Mobile"
+            inputMode="numeric"
+            className="h-12 w-full rounded-sm border border-line bg-bg px-3 text-base outline-none focus:border-accent"
+            value={mobile}
+            onChange={(event) => setMobile(event.target.value)}
+          />
+          <input
+            aria-label="Service charge"
+            placeholder="Service charge"
+            inputMode="numeric"
+            className="h-12 w-full rounded-sm border border-line bg-bg px-3 text-base outline-none focus:border-accent"
+            value={amount}
+            onChange={(event) => setAmount(event.target.value)}
+          />
           <div className="sm:col-span-2">
             <PayModeButtons
               mode={personalGpay ? "gpay" : payMode}
@@ -267,28 +265,30 @@ function CounterPage() {
               onChange={(event) => {
                 if (event.target.checked) {
                   setPayMode("gpay");
-                  setAskGpay(true);
+                  setPersonalGpay(true);
                 } else {
                   setPersonalGpay(false);
                   setDepartment("");
                 }
               }}
             />
-            Customer paid GPay to a personal number, not the Akshaya account
+            Personal GPay (9995080431)
           </label>
           {personalGpay ? (
-            <div className="rounded-lg border border-line bg-bg px-3 py-2 text-sm sm:col-span-2">
-              <p>Total received {inr(Number(amount || 0) + Number(department || 0))}</p>
-              <p className="text-muted">
-                Service charge {inr(Number(amount || 0))} · Department payment {inr(Number(department || 0))}
-              </p>
-              <Button type="button" size="sm" variant="secondary" className="mt-2" onClick={() => setAskGpay(true)}>
-                Change the split
-              </Button>
-            </div>
+            <label className="block text-sm sm:col-span-2">
+              <input
+                inputMode="numeric"
+                aria-label="Department payment"
+                placeholder="Department payment"
+                className="h-12 w-full rounded-sm border border-line bg-bg px-3 text-base outline-none focus:border-accent sm:max-w-xs"
+                value={department}
+                onChange={(event) => setDepartment(event.target.value.replace(/[^\d]/g, "").slice(0, 7))}
+              />
+              <span className="mt-1 block text-sm tabular-nums">On the phone {inr(Number(amount || 0) + Number(department || 0))}</span>
+            </label>
           ) : null}
           <div className="sm:col-span-2">
-            <Button type="submit" disabled={pending}>
+            <Button type="submit" className="min-h-12 w-full" disabled={pending}>
               {pending ? "Saving…" : "Add charge"}
             </Button>
           </div>
@@ -297,18 +297,6 @@ function CounterPage() {
         <p className="mt-4 text-sm text-muted">Open today to enter a charge. This date is only for viewing.</p>
       ) : null}
       {notice ? <p className="mt-3 text-sm text-muted">{notice}</p> : null}
-      <GpaySplitDialog
-        open={askGpay}
-        serviceCharge={amount}
-        department={department}
-        onOpenChange={setAskGpay}
-        onConfirm={(charge, part) => {
-          setAmount(String(charge));
-          setDepartment(String(part));
-          setPersonalGpay(true);
-          setAskGpay(false);
-        }}
-      />
 
       {panel === "credit" ? <CounterCredit month={(day || today).slice(0, 7)} onResult={setResult} /> : null}
       {panel === "advance" ? <CounterAdvance onResult={setResult} /> : null}
@@ -489,7 +477,6 @@ function EditCharge({ line, onClose, onResult }: { line: ServiceLine; onClose: (
   const [department, setDepartment] = useState(line.department ? String(line.department) : "");
   const [payMode, setPayMode] = useState<"cash" | "gpay" | "mixed">(line.personalGpay ? "gpay" : line.payMode === "mixed" || line.payMode === "gpay" ? line.payMode : "cash");
   const [cashPart, setCashPart] = useState(line.payMode === "mixed" && line.cashPart ? String(line.cashPart) : "");
-  const [askGpay, setAskGpay] = useState(false);
   const [pending, setPending] = useState(false);
   return (
     <li className="rounded-lg border border-line p-3">
@@ -554,119 +541,33 @@ function EditCharge({ line, onClose, onResult }: { line: ServiceLine; onClose: (
             onChange={(event) => {
               if (event.target.checked) {
                 setPayMode("gpay");
-                setAskGpay(true);
+                setPersonalGpay(true);
               } else {
                 setPersonalGpay(false);
                 setDepartment("");
               }
             }}
           />
-          GPay to a personal number
+          Personal GPay (9995080431)
         </label>
         {personalGpay ? (
-          <div className="text-sm sm:col-span-2">
-            <p>
-              Total {inr(Number(amount || 0) + Number(department || 0))} · Service {inr(Number(amount || 0))} · Department {inr(Number(department || 0))}
-            </p>
-            <Button type="button" size="sm" variant="secondary" className="mt-2" onClick={() => setAskGpay(true)}>
-              Change the split
-            </Button>
-          </div>
+          <label className="block text-sm sm:col-span-2">
+            <span className="mb-1 block text-muted">Department payment</span>
+            <input
+              inputMode="numeric"
+              aria-label="Department payment"
+              className="h-11 w-full rounded-sm border border-line bg-bg px-3 text-base outline-none focus:border-accent sm:max-w-xs"
+              value={department}
+              onChange={(event) => setDepartment(event.target.value.replace(/[^\d]/g, "").slice(0, 7))}
+            />
+          </label>
         ) : null}
         <div className="flex gap-2 sm:col-span-2">
           <Button type="submit" disabled={pending}>{pending ? "Saving…" : "Save"}</Button>
           <Button type="button" variant="secondary" onClick={onClose}>Cancel</Button>
         </div>
       </form>
-      <GpaySplitDialog
-        open={askGpay}
-        serviceCharge={amount}
-        department={department}
-        onOpenChange={setAskGpay}
-        onConfirm={(charge, part) => {
-          setAmount(String(charge));
-          setDepartment(String(part));
-          setPersonalGpay(true);
-          setAskGpay(false);
-        }}
-      />
     </li>
-  );
-}
-
-function GpaySplitDialog({
-  open,
-  serviceCharge,
-  department,
-  onOpenChange,
-  onConfirm,
-}: {
-  open: boolean;
-  serviceCharge: string;
-  department: string;
-  onOpenChange: (open: boolean) => void;
-  onConfirm: (serviceCharge: number, department: number) => void;
-}) {
-  const [total, setTotal] = useState("");
-  const [service, setService] = useState("");
-  const [dept, setDept] = useState("");
-  const [error, setError] = useState("");
-
-  useEffect(() => {
-    if (!open) return;
-    const charge = Math.round(Number(serviceCharge) || 0);
-    const part = Math.round(Number(department) || 0);
-    setService(charge > 0 ? String(charge) : "");
-    setDept(part > 0 ? String(part) : "");
-    setTotal(charge + part > 0 ? String(charge + part) : "");
-    setError("");
-  }, [open, serviceCharge, department]);
-
-  const received = Math.round(Number(total) || 0);
-  const charge = Math.round(Number(service) || 0);
-  const part = Math.round(Number(dept) || 0);
-  const matches = received > 0 && charge > 0 && part >= 0 && charge + part === received;
-
-  return (
-    <Modal
-      open={open}
-      onOpenChange={onOpenChange}
-      title="Personal GPay"
-      description="Enter the three amounts separately. The total must be the service charge plus the department payment."
-    >
-      <div className="grid gap-3">
-        <label className="block text-sm">
-          <span className="mb-1 block text-muted">Total received on the personal number</span>
-          <input inputMode="numeric" className="h-11 w-full rounded-sm border border-line bg-bg px-3 text-base outline-none focus:border-accent" value={total} onChange={(event) => setTotal(event.target.value)} />
-        </label>
-        <label className="block text-sm">
-          <span className="mb-1 block text-muted">Service charge</span>
-          <input inputMode="numeric" className="h-11 w-full rounded-sm border border-line bg-bg px-3 text-base outline-none focus:border-accent" value={service} onChange={(event) => setService(event.target.value)} />
-        </label>
-        <label className="block text-sm">
-          <span className="mb-1 block text-muted">Department payment</span>
-          <input inputMode="numeric" className="h-11 w-full rounded-sm border border-line bg-bg px-3 text-base outline-none focus:border-accent" value={dept} onChange={(event) => setDept(event.target.value)} />
-        </label>
-        <p className={matches ? "text-sm text-muted" : "text-sm text-bad"}>
-          {charge + part === received
-            ? `Service ${inr(charge)} + department ${inr(part)} = total ${inr(received)}.`
-            : `These do not match. Service ${inr(charge)} + department ${inr(part)} is ${inr(charge + part)}, not ${inr(received)}.`}
-        </p>
-        {error ? <p className="text-sm text-bad">{error}</p> : null}
-        <Button
-          type="button"
-          onClick={() => {
-            if (!matches) {
-              setError("Enter the total, the service charge, and the department payment so they add up.");
-              return;
-            }
-            onConfirm(charge, part);
-          }}
-        >
-          Use these amounts
-        </Button>
-      </div>
-    </Modal>
   );
 }
 
