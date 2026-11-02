@@ -124,7 +124,7 @@ function closeBase(row: CashClose): number {
 export function previousClose(rows: CashClose[], date: string): CashClose | null {
   let best: CashClose | null = null;
   for (const row of rows) {
-    if (row.date < date && (!best || row.date > best.date)) best = row;
+    if (row.date < date && countStarted(row) && (!best || row.date > best.date)) best = row;
   }
   return best;
 }

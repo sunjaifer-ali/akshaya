@@ -242,7 +242,7 @@ function ClosingPage() {
       {role === "admin" ? (
         <section className="mx-auto mt-3 max-w-lg rounded-xl border border-line bg-surface p-4">
           <h2 className="font-medium">Cash in</h2>
-          <p className="mt-1 text-sm text-muted">Money you add to Akshaya from your own bank. Enter it here and in the bank or cash count. It is not income.</p>
+          <p className="mt-1 text-sm text-muted">From your own bank. Not income. Saving this does not close the day.</p>
           <div className="mt-3 grid gap-3 sm:grid-cols-2">
             <Field label="Amount added">
               <MoneyField label="Amount added" value={row.cashIn ?? 0} disabled={locked} onChange={(amount) => patch({ cashIn: amount ?? 0 })} />
@@ -262,9 +262,10 @@ function ClosingPage() {
             <Button
               className="no-print mt-3"
               onClick={() => {
-                const next = { ...row, date, countedBy: row.countedBy || user?.displayName?.trim() || "Admin" };
+                const existing = book.cashCloses.find((item) => item.date === date);
+                const next = { ...(existing ?? blank(date)), date, cashIn: row.cashIn ?? 0, cashInNote: row.cashInNote ?? "", accepted: existing?.accepted ?? false };
                 book.setCashClose(next);
-                setResult({ ok: true, message: "Cash in saved." });
+                setResult({ ok: true, message: "Cash in saved. The day stays open." });
                 void pushClose(date, next).catch((error: unknown) => {
                   setResult({ ok: false, message: error instanceof Error ? error.message : "Saved on this browser, but not shared." });
                 });

@@ -3,6 +3,7 @@ import { authMiddleware } from "@/lib/auth/middleware";
 import type { CashClose, CentrePayout, CollectionDay, LedgerData } from "@/lib/ledger/types";
 import { PAYOUT_KINDS, withCategories } from "@/lib/ledger/types";
 import { isSunday } from "@/lib/ledger/dates";
+import { countStarted } from "@/lib/ledger/cash";
 import { centreEmail, cleanUsername } from "@/lib/username";
 import { withTransaction } from "@/lib/db";
 
@@ -1821,7 +1822,9 @@ export const updateServiceEntry = createServerFn({ method: "POST" })
 async function dayIsClosed(sql: Awaited<ReturnType<typeof import("@/lib/db").getSql>>, date: string) {
   const current = await sql<{ data: LedgerData | string }>`select data from centre_book where id = 'centre'`;
   const book = current[0] ? asJson(current[0].data) : null;
-  return (book?.cashCloses ?? []).some((close) => close.date === date);
+  const close = (book?.cashCloses ?? []).find((item) => item.date === date);
+  if (!close) return false;
+  return Boolean(close.accepted) || countStarted(close);
 }
 
 async function dayIsAccepted(sql: Awaited<ReturnType<typeof import("@/lib/db").getSql>>, date: string) {
