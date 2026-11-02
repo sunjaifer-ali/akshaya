@@ -49,6 +49,11 @@ export type CreditGiven = {
   amount: number;
 };
 
+export type CashInLine = {
+  amount: number;
+  note: string;
+};
+
 export type CashClose = {
   date: string;
   notes: NoteCounts;
@@ -68,6 +73,7 @@ export type CashClose = {
   profitNote?: string;
   cashIn?: number;
   cashInNote?: string;
+  cashIns?: CashInLine[];
   creditSeparate?: boolean;
   personalBalance?: number;
 };

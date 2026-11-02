@@ -349,7 +349,14 @@ export const useLedger = create<LedgerState>()(
             ...(typeof close.advanceIn === "number" ? { advanceIn: rupee(close.advanceIn) } : {}),
             profitTaken: rupee(close.profitTaken ?? 0),
             profitNote: (close.profitNote ?? "").trim().slice(0, 80),
-            cashIn: rupee(close.cashIn ?? 0),
+            cashIns: (close.cashIns ?? [])
+              .map((item) => ({ amount: rupee(item.amount), note: (item.note ?? "").trim().slice(0, 80) }))
+              .filter((item) => item.amount > 0),
+            cashIn: rupee(
+              (close.cashIns ?? []).some((item) => rupee(item.amount) > 0)
+                ? (close.cashIns ?? []).reduce((sum, item) => sum + rupee(item.amount), 0)
+                : (close.cashIn ?? 0),
+            ),
             cashInNote: (close.cashInNote ?? "").trim().slice(0, 80),
             creditSeparate: Boolean(close.creditSeparate),
             ...(typeof close.personalBalance === "number" ? { personalBalance: rupee(close.personalBalance) } : {}),

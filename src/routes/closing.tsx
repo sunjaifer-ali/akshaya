@@ -48,7 +48,7 @@ function ClosingPage() {
   const locked = accepted && role !== "admin";
   const previous = previousClose(book.cashCloses, date);
   const [draft, setDraft] = useState<CashClose>(() => saved ?? blank(date, previous?.credits ?? 0));
-  const [editing, setEditing] = useState(!saved);
+  const [editing, setEditing] = useState(!saved || !countStarted(saved));
   const [notice, setNotice] = useState("");
   const [result, setResult] = useState<Result | null>(null);
   const [confirmClear, setConfirmClear] = useState(false);
@@ -58,6 +58,10 @@ function ClosingPage() {
   const [payAmount, setPayAmount] = useState<number | null>(null);
   const [payNote, setPayNote] = useState("");
   const [gpayByDate, setGpayByDate] = useState<Record<string, { service: number; department: number }>>({});
+  const [cashAmount, setCashAmount] = useState<number | null>(null);
+  const [cashFrom, setCashFrom] = useState("");
+  const [transferAmount, setTransferAmount] = useState<number | null>(saved?.profitTaken || null);
+  const [transferAccount, setTransferAccount] = useState(saved?.profitNote ?? "");
 
   useEffect(() => {
     void myRole()
@@ -78,7 +82,11 @@ function ClosingPage() {
     const current = book.cashCloses.find((item) => item.date === date);
     const prev = previousClose(book.cashCloses, date);
     setDraft(current ?? blank(date, prev?.credits ?? 0, counterName(book.employees, user?.displayName)));
-    setEditing(!current);
+    setEditing(!current || !countStarted(current));
+    setTransferAmount(current?.profitTaken || null);
+    setTransferAccount(current?.profitNote ?? "");
+    setCashAmount(null);
+    setCashFrom("");
     setConfirmClear(false);
     // Only when the day changes. A shared save must not wipe the count being typed.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -162,6 +170,35 @@ function ClosingPage() {
   const patch = (next: Partial<CashClose>) => {
     setDraft((current) => ({ ...current, ...next, date }));
   };
+  const cashLines = cashEntries(saved);
+  const remember = (movement: Partial<CashClose>, ok: string) => {
+    const existing = book.cashCloses.find((item) => item.date === date);
+    const next: CashClose = {
+      ...(existing ?? blank(date)),
+      ...movement,
+      date,
+      accepted: existing?.accepted ?? false,
+      notes: existing?.notes ?? emptyNotes(),
+      eDistrict: existing?.eDistrict ?? 0,
+      csc: existing?.csc ?? 0,
+      bank: existing?.bank ?? 0,
+    };
+    book.setCashClose(next);
+    setDraft((current) => ({
+      ...current,
+      ...movement,
+      date,
+      notes: current.notes,
+      eDistrict: current.eDistrict,
+      csc: current.csc,
+      bank: current.bank,
+    }));
+    if (!countStarted(next)) setEditing(true);
+    setResult({ ok: true, message: ok });
+    void pushClose(date, next).catch((error: unknown) => {
+      setResult({ ok: false, message: error instanceof Error ? error.message : "Saved on this browser, but not shared." });
+    });
+  };
 
   return (
     <div className="report-sheet mx-auto max-w-xl">
@@ -191,10 +228,118 @@ function ClosingPage() {
 
       <p className="mb-4 text-sm text-muted">
         {formatFull(date)}
-        {saved && !editing ? " · Saved" : " · Not saved"}
-        {saved ? ` · Closed by ${row.countedBy || "Admin"}` : ""}
+        {saved && countStarted(saved) && !editing ? " · Saved" : ""}
+        {saved && countStarted(saved) ? ` · Closed by ${row.countedBy || "Admin"}` : ""}
         {accepted ? " · Accepted" : ""}
       </p>
+
+      {role === "admin" ? (
+        <section className="mx-auto mt-3 max-w-lg rounded-xl border border-line bg-surface p-4">
+          <div className="flex items-baseline justify-between gap-3">
+            <h2 className="font-medium">Cash in</h2>
+            <p className="tabular-nums">{inr(cashLines.reduce((sum, item) => sum + item.amount, 0))}</p>
+          </div>
+          <p className="mt-1 text-sm text-muted">Add each amount from your own bank. This can be more than once. It does not close the day.</p>
+          {cashLines.length > 0 ? (
+            <ul className="mt-3 divide-y divide-line">
+              {cashLines.map((item, index) => (
+                <li key={`${item.note}-${item.amount}-${index}`} className="flex items-center justify-between gap-3 py-2 text-sm">
+                  <span>
+                    {inr(item.amount)}
+                    {item.note ? <span className="mt-0.5 block text-xs text-faint">{item.note}</span> : null}
+                  </span>
+                  {locked ? null : (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        const lines = cashLines.filter((_, itemIndex) => itemIndex !== index);
+                        remember(
+                          { cashIns: lines, cashIn: lines.reduce((sum, line) => sum + line.amount, 0), cashInNote: lines.map((line) => line.note).filter(Boolean).join(", ").slice(0, 80) },
+                          "Cash in removed. The day stays open.",
+                        );
+                      }}
+                    >
+                      Remove
+                    </Button>
+                  )}
+                </li>
+              ))}
+            </ul>
+          ) : null}
+          {locked ? null : (
+            <div className="mt-3 grid gap-3 sm:grid-cols-2">
+              <Field label="Amount added">
+                <MoneyField label="Amount added" value={cashAmount} onChange={setCashAmount} />
+              </Field>
+              <label className="block text-sm">
+                <span className="mb-1 block text-muted">From</span>
+                <input
+                  className="h-11 w-full rounded-sm border border-line bg-bg px-3 text-base outline-none focus:border-accent"
+                  value={cashFrom}
+                  placeholder="Own bank"
+                  onChange={(event) => setCashFrom(event.target.value.slice(0, 80))}
+                />
+              </label>
+              <div className="sm:col-span-2">
+                <Button
+                  onClick={() => {
+                    const amount = cashAmount ?? 0;
+                    if (amount <= 0) {
+                      setResult({ ok: false, message: "Enter the cash in amount." });
+                      return;
+                    }
+                    const lines = [...cashLines, { amount, note: cashFrom.trim() }];
+                    remember(
+                      { cashIns: lines, cashIn: lines.reduce((sum, line) => sum + line.amount, 0), cashInNote: lines.map((line) => line.note).filter(Boolean).join(", ").slice(0, 80) },
+                      "Cash in saved. The day stays open.",
+                    );
+                    setCashAmount(null);
+                    setCashFrom("");
+                  }}
+                >
+                  Add
+                </Button>
+              </div>
+            </div>
+          )}
+        </section>
+      ) : null}
+
+      {role === "admin" ? (
+        <section className="mx-auto mt-3 max-w-lg rounded-xl border border-line bg-surface p-4">
+          <h2 className="font-medium">Transfer to self or other accounts</h2>
+          <p className="mt-1 text-sm text-muted">Enter this before the count. Saving it does not close the day.</p>
+          <div className="mt-3 grid gap-3 sm:grid-cols-2">
+            <Field label="Amount transferred">
+              <MoneyField label="Amount transferred" value={transferAmount} disabled={locked} onChange={setTransferAmount} />
+            </Field>
+            <label className="block text-sm">
+              <span className="mb-1 block text-muted">Account</span>
+              <input
+                className="h-11 w-full rounded-sm border border-line bg-bg px-3 text-base outline-none focus:border-accent disabled:opacity-70"
+                value={transferAccount}
+                disabled={locked}
+                placeholder="Own account"
+                onChange={(event) => setTransferAccount(event.target.value.slice(0, 80))}
+              />
+            </label>
+          </div>
+          {locked ? null : (
+            <Button
+              className="no-print mt-3"
+              onClick={() => {
+                remember(
+                  { profitTaken: transferAmount ?? 0, profitNote: transferAccount.trim() },
+                  "Transfer saved. The day stays open.",
+                );
+              }}
+            >
+              Save
+            </Button>
+          )}
+        </section>
+      ) : null}
 
       <section className="mx-auto max-w-lg rounded-xl border border-line bg-surface p-4">
         <h2 className="text-center font-medium">Notes</h2>
@@ -257,81 +402,6 @@ function ClosingPage() {
         locked={locked}
       />
 
-      {role === "admin" ? (
-        <section className="mx-auto mt-3 max-w-lg rounded-xl border border-line bg-surface p-4">
-          <h2 className="font-medium">Cash in</h2>
-          <p className="mt-1 text-sm text-muted">From your own bank. Not income. Saving this does not close the day.</p>
-          <div className="mt-3 grid gap-3 sm:grid-cols-2">
-            <Field label="Amount added">
-              <MoneyField label="Amount added" value={row.cashIn ?? 0} disabled={locked} onChange={(amount) => patch({ cashIn: amount ?? 0 })} />
-            </Field>
-            <label className="block text-sm">
-              <span className="mb-1 block text-muted">From</span>
-              <input
-                className="h-11 w-full rounded-sm border border-line bg-bg px-3 text-base outline-none focus:border-accent disabled:opacity-70"
-                value={row.cashInNote ?? ""}
-                disabled={locked}
-                placeholder="Own bank"
-                onChange={(event) => patch({ cashInNote: event.target.value.slice(0, 80) })}
-              />
-            </label>
-          </div>
-          {locked ? null : (
-            <Button
-              className="no-print mt-3"
-              onClick={() => {
-                const existing = book.cashCloses.find((item) => item.date === date);
-                const next = { ...(existing ?? blank(date)), date, cashIn: row.cashIn ?? 0, cashInNote: row.cashInNote ?? "", accepted: existing?.accepted ?? false };
-                book.setCashClose(next);
-                setDraft(next);
-                setResult({ ok: true, message: "Cash in saved. The day stays open." });
-                void pushClose(date, next).catch((error: unknown) => {
-                  setResult({ ok: false, message: error instanceof Error ? error.message : "Saved on this browser, but not shared." });
-                });
-              }}
-            >
-              Save
-            </Button>
-          )}
-        </section>
-      ) : null}
-
-      {role === "admin" ? (
-        <section className="mx-auto mt-3 max-w-lg rounded-xl border border-line bg-surface p-4">
-          <h2 className="font-medium">Transfer to self or other accounts</h2>
-          <div className="mt-3 grid gap-3 sm:grid-cols-2">
-            <Field label="Amount transferred">
-              <MoneyField label="Amount transferred" value={row.profitTaken ?? 0} disabled={locked} onChange={(amount) => patch({ profitTaken: amount ?? 0 })} />
-            </Field>
-            <label className="block text-sm">
-              <span className="mb-1 block text-muted">Account</span>
-              <input
-                className="h-11 w-full rounded-sm border border-line bg-bg px-3 text-base outline-none focus:border-accent disabled:opacity-70"
-                value={row.profitNote ?? ""}
-                disabled={locked}
-                placeholder="Own account"
-                onChange={(event) => patch({ profitNote: event.target.value.slice(0, 80) })}
-              />
-            </label>
-          </div>
-          {locked ? null : (
-            <Button
-              className="no-print mt-3"
-              onClick={() => {
-                const next = { ...row, date, countedBy: row.countedBy || user?.displayName?.trim() || "Admin" };
-                book.setCashClose(next);
-                setResult({ ok: true, message: "Transfer saved." });
-                void pushClose(date, next).catch((error: unknown) => {
-                  setResult({ ok: false, message: error instanceof Error ? error.message : "Saved on this browser, but not shared." });
-                });
-              }}
-            >
-              Save
-            </Button>
-          )}
-        </section>
-      ) : null}
-
       <section className="mx-auto mt-3 max-w-lg rounded-xl border border-line bg-surface p-4 text-center">
         <h2 className="font-medium">Total closing</h2>
         <p className="mt-1 font-display text-3xl tabular-nums">{inr(closing)}</p>
@@ -364,7 +434,8 @@ function ClosingPage() {
               const closer = user?.displayName?.trim() || "Admin";
               const next = { ...row, date, countedBy: closer, accepted: role === "admin" ? Boolean(saved?.accepted) : false };
               book.setCashClose(next);
-              setEditing(false);
+              setDraft(next);
+              setEditing(countStarted(next) ? false : true);
               setResult({ ok: true, message: `Closing for ${formatDay(date)} successfully saved.` });
               void pushClose(date, next).catch((error: unknown) => {
                 setResult({ ok: false, message: error instanceof Error ? error.message : "Saved on this browser, but not shared." });
@@ -704,6 +775,13 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
   );
 }
 
+function cashEntries(close?: CashClose): { amount: number; note: string }[] {
+  if (!close) return [];
+  if ((close.cashIns ?? []).length > 0) return close.cashIns ?? [];
+  if ((close.cashIn ?? 0) > 0) return [{ amount: close.cashIn ?? 0, note: close.cashInNote ?? "" }];
+  return [];
+}
+
 function blank(date: string, credits = 0, countedBy = ""): CashClose {
   return {
     date,
@@ -724,6 +802,7 @@ function blank(date: string, credits = 0, countedBy = ""): CashClose {
     profitNote: "",
     cashIn: 0,
     cashInNote: "",
+    cashIns: [],
   };
 }
 
