@@ -10,7 +10,7 @@ import type {
   PerfOverride,
   SalaryPaid,
 } from "@/lib/ledger/types";
-import { isSelfExpense } from "@/lib/ledger/types";
+import { isPersonalPayout, isSelfExpense } from "@/lib/ledger/types";
 
 export function monthDays(days: CollectionDay[], month: string): CollectionDay[] {
   return days.filter((day) => day.date.startsWith(month));
@@ -214,7 +214,9 @@ export function expenseLineTotal(lines: ExpenseLine[] | undefined, month: string
 export function payoutTotal(payouts: CentrePayout[] | undefined, month: string, categoryId?: string): number {
   return (payouts ?? []).reduce((sum, item) => {
     if (!item.date.startsWith(month)) return sum;
-    if (categoryId && item.category !== categoryId) return sum;
+    if (categoryId) {
+      if (item.category !== categoryId) return sum;
+    } else if (isPersonalPayout(item.category)) return sum;
     return sum + (item.amount || 0);
   }, 0);
 }
@@ -527,7 +529,7 @@ export function centreSnapshot(
     asOf,
     salaryPaid,
   );
-  const selfExpense = expenseLineTotal(expenseLines, month, "self");
+  const selfExpense = expenseLineTotal(expenseLines, month, "self") + payoutTotal(payouts, month, "personal");
   const expense = expenseTotal(expenses, month) + payoutTotal(payouts, month) + expenseLineTotal(expenseLines, month, "cost");
   const basicPay = rows.reduce((sum, row) => sum + row.pay.basicPayable, 0);
   const incentivePay = rows.reduce((sum, row) => sum + row.pay.incentive, 0);

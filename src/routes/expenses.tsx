@@ -29,7 +29,7 @@ function ExpensesPage() {
   const [result, setResult] = useState<Result | null>(null);
   const lines = (book.expenseLines ?? []).filter((line) => line.month === month);
   const operating = expenseLineTotal(book.expenseLines, month, "cost");
-  const self = expenseLineTotal(book.expenseLines, month, "self");
+  const self = expenseLineTotal(book.expenseLines, month, "self") + payoutTotal(book.payouts, month, "personal");
   const earlier = expenseTotal(book.expenses, month);
   const closingPaid = payoutTotal(book.payouts, month);
   const expenses = operating + earlier + closingPaid;
@@ -122,7 +122,7 @@ function ExpensesPage() {
               value={category}
               onChange={(event) => setCategory(event.target.value)}
             >
-              {EXPENSE_KINDS.map((item) => (
+              {EXPENSE_KINDS.filter((item) => item.id !== "bad").map((item) => (
                 <option key={item.id} value={item.id}>
                   {item.label}
                 </option>

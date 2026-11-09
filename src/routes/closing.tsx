@@ -60,8 +60,8 @@ function ClosingPage() {
   const [gpayByDate, setGpayByDate] = useState<Record<string, { service: number; department: number }>>({});
   const [cashAmount, setCashAmount] = useState<number | null>(null);
   const [cashFrom, setCashFrom] = useState("");
-  const [transferAmount, setTransferAmount] = useState<number | null>(saved?.profitTaken || null);
-  const [transferAccount, setTransferAccount] = useState(saved?.profitNote ?? "");
+  const [transferAmount, setTransferAmount] = useState<number | null>(null);
+  const [transferAccount, setTransferAccount] = useState("");
 
   useEffect(() => {
     void myRole()
@@ -83,8 +83,8 @@ function ClosingPage() {
     const prev = previousClose(book.cashCloses, date);
     setDraft(current ?? blank(date, prev?.credits ?? 0, counterName(book.employees, user?.displayName)));
     setEditing(!current || !countStarted(current));
-    setTransferAmount(current?.profitTaken || null);
-    setTransferAccount(current?.profitNote ?? "");
+    setTransferAmount(null);
+    setTransferAccount("");
     setCashAmount(null);
     setCashFrom("");
     setConfirmClear(false);
@@ -122,8 +122,10 @@ function ClosingPage() {
         ...(saved ?? draft),
         cashIn: draft.cashIn,
         cashInNote: draft.cashInNote,
+        cashIns: draft.cashIns,
         profitTaken: draft.profitTaken,
         profitNote: draft.profitNote,
+        transfers: draft.transfers,
       };
   const separate = Boolean(saved?.creditSeparate) || !saved || Boolean(today && date >= today);
   const useLiveAdvance = Boolean(liveAdvance?.tracked);
@@ -171,6 +173,7 @@ function ClosingPage() {
     setDraft((current) => ({ ...current, ...next, date }));
   };
   const cashLines = cashEntries(saved);
+  const transferLines = transferEntries(saved);
   const remember = (movement: Partial<CashClose>, ok: string) => {
     const existing = book.cashCloses.find((item) => item.date === date);
     const next: CashClose = {
@@ -303,32 +306,62 @@ function ClosingPage() {
 
       {role === "admin" ? (
         <section className="mx-auto mt-2 max-w-lg rounded-xl border border-line bg-surface px-3 py-3">
-          <h2 className="text-sm font-medium">Transfer to self</h2>
-          <div className="mt-2 flex flex-wrap items-end gap-2">
-            <div className="w-32">
-              <MoneyField label="Amount transferred" value={transferAmount} disabled={locked} onChange={setTransferAmount} />
-            </div>
-            <input
-              aria-label="Transfer account"
-              className="h-11 min-w-32 flex-1 rounded-sm border border-line bg-bg px-3 text-base outline-none focus:border-accent disabled:opacity-70"
-              value={transferAccount}
-              disabled={locked}
-              placeholder="Account"
-              onChange={(event) => setTransferAccount(event.target.value.slice(0, 80))}
-            />
-            {locked ? null : (
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="text-sm font-medium">Transfer to self</h2>
+            <p className="text-sm tabular-nums">{inr(transferLines.reduce((sum, item) => sum + item.amount, 0))}</p>
+          </div>
+          {transferLines.length > 0 ? (
+            <ul className="mt-2 divide-y divide-line">
+              {transferLines.map((item, index) => (
+                <li key={`${item.note}-${item.amount}-${index}`} className="flex items-center justify-between gap-3 py-1.5 text-sm">
+                  <span>
+                    {inr(item.amount)}
+                    {item.note ? <span className="text-muted"> · {item.note}</span> : null}
+                  </span>
+                  {locked ? null : (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        const lines = transferLines.filter((_, itemIndex) => itemIndex !== index);
+                        remember(transferPatch(lines), "Transfer removed.");
+                      }}
+                    >
+                      Remove
+                    </Button>
+                  )}
+                </li>
+              ))}
+            </ul>
+          ) : null}
+          {locked ? null : (
+            <div className="mt-2 flex flex-wrap items-end gap-2">
+              <div className="w-32">
+                <MoneyField label="Amount transferred" value={transferAmount} onChange={setTransferAmount} />
+              </div>
+              <input
+                aria-label="Transfer account"
+                className="h-11 min-w-32 flex-1 rounded-sm border border-line bg-bg px-3 text-base outline-none focus:border-accent"
+                value={transferAccount}
+                placeholder="Account"
+                onChange={(event) => setTransferAccount(event.target.value.slice(0, 80))}
+              />
               <Button
                 onClick={() => {
-                  remember(
-                    { profitTaken: transferAmount ?? 0, profitNote: transferAccount.trim() },
-                    "Transfer saved.",
-                  );
+                  const amount = transferAmount ?? 0;
+                  if (amount <= 0) {
+                    setResult({ ok: false, message: "Enter the amount transferred." });
+                    return;
+                  }
+                  remember(transferPatch([...transferLines, { amount, note: transferAccount.trim() }]), "Transfer saved.");
+                  setTransferAmount(null);
+                  setTransferAccount("");
                 }}
               >
-                Save
+                Add
               </Button>
-            )}
-          </div>
+            </div>
+          )}
         </section>
       ) : null}
 
@@ -773,6 +806,21 @@ function cashEntries(close?: CashClose): { amount: number; note: string }[] {
   return [];
 }
 
+function transferEntries(close?: CashClose): { amount: number; note: string }[] {
+  if (!close) return [];
+  if ((close.transfers ?? []).length > 0) return close.transfers ?? [];
+  if ((close.profitTaken ?? 0) > 0) return [{ amount: close.profitTaken ?? 0, note: close.profitNote ?? "" }];
+  return [];
+}
+
+function transferPatch(lines: { amount: number; note: string }[]) {
+  return {
+    transfers: lines,
+    profitTaken: lines.reduce((sum, line) => sum + line.amount, 0),
+    profitNote: lines.map((line) => line.note).filter(Boolean).join(", ").slice(0, 80),
+  };
+}
+
 function blank(date: string, credits = 0, countedBy = ""): CashClose {
   return {
     date,
@@ -791,6 +839,7 @@ function blank(date: string, credits = 0, countedBy = ""): CashClose {
     advanceServed: 0,
     profitTaken: 0,
     profitNote: "",
+    transfers: [],
     cashIn: 0,
     cashInNote: "",
     cashIns: [],

@@ -7,7 +7,7 @@ import { ResultDialog, type Result } from "@/components/result-dialog";
 import { addCentrePayout, listCentrePayouts, removeCentrePayout, type PayoutRow } from "@/lib/centre.functions";
 import { inr } from "@/lib/format";
 import { formatDay } from "@/lib/ledger/dates";
-import { payoutKind, payoutLabel } from "@/lib/ledger/types";
+import { STAFF_PAY_KINDS, payoutLabel } from "@/lib/ledger/types";
 import { useTodayKey } from "@/lib/use-today";
 
 export const Route = createFileRoute("/payments")({
@@ -21,6 +21,7 @@ function PaymentsPage() {
   const [role, setRole] = useState("employee");
   const [closed, setClosed] = useState(false);
   const [paid, setPaid] = useState("");
+  const [kind, setKind] = useState<(typeof STAFF_PAY_KINDS)[number]["id"]>("centre");
   const [amount, setAmount] = useState<number | null>(null);
   const [pending, setPending] = useState(false);
   const [openDay, setOpenDay] = useState("");
@@ -72,10 +73,11 @@ function PaymentsPage() {
             return;
           }
           setPending(true);
-          void addCentrePayout({ data: { date, category: payoutKind(written), amount: amount ?? 0, note: written } })
+          void addCentrePayout({ data: { date, category: kind, amount: amount ?? 0, note: written } })
             .then(() => {
               setAmount(null);
               setPaid("");
+              setKind("centre");
               setResult({ ok: true, message: "Payment successfully saved." });
               load();
             })
@@ -83,6 +85,19 @@ function PaymentsPage() {
             .finally(() => setPending(false));
         }}
       >
+        <div className="flex w-full flex-wrap gap-2">
+          {STAFF_PAY_KINDS.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              disabled={locked}
+              className={`min-h-11 rounded-sm border px-3 text-sm font-medium ${kind === item.id ? "border-accent bg-accent text-accent-ink" : "border-line bg-bg text-ink"}`}
+              onClick={() => setKind(item.id)}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
         <input
           aria-label="What was paid"
           className="h-12 min-w-40 flex-1 rounded-sm border border-line bg-bg px-3 text-base outline-none focus:border-accent disabled:bg-surface-2"
@@ -151,7 +166,10 @@ function PaymentLine({ row, canRemove, onRemove }: { row: PayoutRow; canRemove: 
     <li className="flex items-center justify-between gap-3 px-4 py-3 text-sm">
       <span>
         <span className="font-medium">{row.note || payoutLabel(row.category)}</span>
-        <span className="text-muted"> · {row.by}</span>
+        <span className="mt-0.5 block text-xs text-faint">
+          {payoutLabel(row.category)}
+          {row.by ? ` · ${row.by}` : ""}
+        </span>
       </span>
       <span className="flex items-center gap-2">
         <span className="tabular-nums">{inr(row.amount)}</span>

@@ -71,6 +71,7 @@ export type CashClose = {
   advanceIn?: number;
   profitTaken?: number;
   profitNote?: string;
+  transfers?: CashInLine[];
   cashIn?: number;
   cashInNote?: string;
   cashIns?: CashInLine[];
@@ -93,10 +94,22 @@ export const PAYOUT_KINDS = [
   { id: "stationery", label: "Stationery" },
   { id: "donation", label: "Donation" },
   { id: "other", label: "Other" },
+  { id: "centre", label: "Centre expense" },
+  { id: "personal", label: "Personal expense" },
+] as const;
+
+export const STAFF_PAY_KINDS = [
+  { id: "centre", label: "Centre expense" },
+  { id: "personal", label: "Personal expense" },
+  { id: "other", label: "Other expense" },
 ] as const;
 
 export function payoutLabel(category: string): string {
-  return PAYOUT_KINDS.find((item) => item.id === category)?.label ?? "Other";
+  return STAFF_PAY_KINDS.find((item) => item.id === category)?.label ?? PAYOUT_KINDS.find((item) => item.id === category)?.label ?? "Other";
+}
+
+export function isPersonalPayout(category: string): boolean {
+  return category === "personal";
 }
 
 export function payoutKind(text: string): string {
@@ -122,6 +135,7 @@ export const EXPENSE_KINDS = [
   { id: "accessories", label: "Accessories" },
   { id: "stationery", label: "Stationery" },
   { id: "others", label: "Others" },
+  { id: "bad", label: "Bad credit" },
   { id: "self", label: "Self expenses" },
 ] as const;
 

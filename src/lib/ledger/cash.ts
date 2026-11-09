@@ -68,15 +68,22 @@ export function unpaidCreditReport(
     for (const payment of close.creditPaid ?? []) {
       let left = payment.amount || 0;
       if (left <= 0) continue;
-      const key = payment.name.trim().toLowerCase();
-      const named = key ? open.filter((line) => line.customer.toLowerCase() === key && line.balance > 0) : [];
-      const targets = named.length > 0 ? named : open.filter((line) => line.balance > 0);
+      const started = left;
+      const key = payment.name.trim().toLowerCase().replace(/\s+/g, " ");
+      const named = key ? open.filter((line) => line.customer.trim().toLowerCase().replace(/\s+/g, " ") === key && line.balance > 0) : [];
+      const targets = [...named.filter((line) => line.date === close.date), ...named.filter((line) => line.date !== close.date)];
       for (const line of targets) {
         if (left <= 0) break;
         const take = Math.min(line.balance, left);
         line.paid += take;
         line.balance -= take;
         left -= take;
+      }
+      if (left !== started) continue;
+      const sameDay = open.filter((line) => line.date === close.date && line.balance === left);
+      if (sameDay.length === 1) {
+        sameDay[0].paid += left;
+        sameDay[0].balance = 0;
       }
     }
   }

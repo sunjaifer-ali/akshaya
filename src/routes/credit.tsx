@@ -5,11 +5,11 @@ import { MonthBar } from "@/components/month-bar";
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import { ResultDialog, type Result } from "@/components/result-dialog";
-import { addAdvance, addCustomerMove, advanceDesk, creditRegister, customerCreditDesk, giveAdvanceService, removeAdvance, removeCustomerMove, updateAdvance, type OpenAdvance, type OpenCredit, type PaidAdvance } from "@/lib/centre.functions";
+import { addAdvance, addCustomerMove, advanceDesk, creditRegister, customerCreditDesk, giveAdvanceService, removeAdvance, removeCustomerMove, updateAdvance, writeOffCredit, type OpenAdvance, type OpenCredit, type PaidAdvance } from "@/lib/centre.functions";
 import { downloadWorkbook } from "@/lib/excel";
 import { inr } from "@/lib/format";
 import { cn } from "@/lib/cn";
-import { formatDay, formatMonth } from "@/lib/ledger/dates";
+import { addDays, formatDay, formatMonth } from "@/lib/ledger/dates";
 import { readMonth } from "@/lib/search";
 import { useResolvedMonth, useTodayKey } from "@/lib/use-today";
 
@@ -24,8 +24,10 @@ function CreditPage() {
   const search = Route.useSearch();
   const navigate = Route.useNavigate();
   const month = useResolvedMonth(search.m ?? "");
+  const today = useTodayKey();
   const [role, setRole] = useState<"admin" | "employee">("employee");
   const [payFor, setPayFor] = useState("");
+  const [writeFor, setWriteFor] = useState("");
   const [payAmount, setPayAmount] = useState("");
   const [payMobile, setPayMobile] = useState("");
   const [customer, setCustomer] = useState("");
@@ -60,6 +62,8 @@ function CreditPage() {
   const paidLines = lines.filter((line) => line.kind === "debit" && (!day || line.date === day));
   const monthGiven = lines.filter((line) => line.kind === "credit").reduce((sum, line) => sum + line.amount, 0);
   const monthPaid = lines.filter((line) => line.kind === "debit").reduce((sum, line) => sum + line.amount, 0);
+  const writtenLines = lines.filter((line) => line.kind === "writeoff" && (!day || line.date === day));
+  const monthWritten = lines.filter((line) => line.kind === "writeoff").reduce((sum, line) => sum + line.amount, 0);
   const stillUnpaid = open.reduce((sum, line) => sum + line.balance, 0);
   const movementDates = [...new Set(lines.map((line) => line.date))].sort((a, b) => (a < b ? 1 : -1));
 
@@ -138,10 +142,11 @@ function CreditPage() {
       {tab === "advance" ? <AdvanceBlock month={month} /> : null}
       {tab === "credit" ? (
       <>
-      <section className="grid gap-3 sm:grid-cols-3">
+      <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <TotalTile label="Still unpaid" value={stillUnpaid} note="Open credit" tone="ink" />
         <TotalTile label="Credit given" value={role === "admin" ? monthGiven : credit} note={role === "admin" ? `${formatMonth(month)} · today ${inr(credit)}` : "Today"} tone="bad" />
         <TotalTile label="Credit received" value={role === "admin" ? monthPaid : debit} note={role === "admin" ? `${formatMonth(month)} · today ${inr(debit)}` : "Today"} tone="good" />
+        {role === "admin" ? <TotalTile label="Bad credit" value={monthWritten} note="Written off" tone="bad" /> : null}
       </section>
       {role === "admin" ? (
         <div className="mt-4">
@@ -173,6 +178,7 @@ function CreditPage() {
                     variant="secondary"
                     onClick={() => {
                       setPayFor(line.customer);
+                      setWriteFor("");
                       setPayAmount(String(line.balance));
                       setPayMobile(line.mobile);
                       setNotice("");
@@ -180,6 +186,18 @@ function CreditPage() {
                   >
                     Update
                   </Button>
+                  {role === "admin" && today && line.date <= addDays(today, -30) ? (
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onClick={() => {
+                        setWriteFor(line.customer);
+                        setPayFor("");
+                      }}
+                    >
+                      Write off
+                    </Button>
+                  ) : null}
                 </span>
               </div>
               {payFor === line.customer ? (
@@ -218,6 +236,28 @@ function CreditPage() {
                   />
                   <Button type="submit" disabled={pending}>
                     Paid
+                  </Button>
+                </form>
+              ) : null}
+              {writeFor === line.customer ? (
+                <form
+                  className="mt-2 flex flex-wrap items-center gap-2"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    setPending(true);
+                    void writeOffCredit({ data: { customer: line.customer, amount: line.balance } })
+                      .then(() => {
+                        setWriteFor("");
+                        setResult({ ok: true, message: "Written off as bad credit. It is no longer unpaid, and it is not counted as cash received." });
+                        load();
+                      })
+                      .catch((error: unknown) => setResult({ ok: false, message: error instanceof Error ? error.message : "The credit was not written off." }))
+                      .finally(() => setPending(false));
+                  }}
+                >
+                  <p className="text-sm text-muted">Write off {inr(line.balance)} as bad credit. No cash comes in.</p>
+                  <Button type="submit" disabled={pending}>
+                    Confirm write off
                   </Button>
                 </form>
               ) : null}
@@ -285,6 +325,12 @@ function CreditPage() {
       <section className="rounded-xl border border-line border-l-4 border-l-accent bg-surface p-5">
         <h2 className="font-display text-2xl">Credit received</h2>
       {role === "admin" ? <MoveList lines={paidLines} empty="No credit received in this view." onDelete={(id) => deleteMove(id, setResult, load)} /> : <p className="mt-3 text-sm text-muted">Today {inr(debit)}</p>}
+      {role === "admin" && writtenLines.length > 0 ? (
+        <div className="mt-4">
+          <h3 className="text-sm font-medium">Written off</h3>
+          <MoveList lines={writtenLines} empty="" onDelete={(id) => deleteMove(id, setResult, load)} />
+        </div>
+      ) : null}
       </section>
       </div>
       </>
