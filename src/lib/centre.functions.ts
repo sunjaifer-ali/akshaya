@@ -302,7 +302,7 @@ function paySplit(amount: number, mode: unknown, cashPart: unknown, personalGpay
 
 function shapeServiceLine(line: ServiceLine): ServiceLine {
   const amount = Number(line.amount);
-  const payMode = line.payMode === "gpay" || line.payMode === "mixed" || line.payMode === "cash" ? line.payMode : "";
+  const payMode = line.payMode === "gpay" || line.payMode === "mixed" || line.payMode === "cash" || line.payMode === "credit" ? line.payMode : "";
   const raw = line.cashPart as number | string | null | undefined;
   const cashPart = raw == null || raw === "" ? null : Number(raw);
   return {
@@ -320,15 +320,18 @@ export type OpenCredit = { customer: string; mobile: string; staff: string; bala
 
 export const addCustomerMove = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
-  .validator((input: { kind: string; customer: string; mobile: string; amount: number }) => {
+  .validator((input: { kind: string; customer: string; mobile: string; amount: number; serviceCharge?: number; department?: number }) => {
     const kind = input.kind === "debit" ? "debit" : input.kind === "credit" ? "credit" : "";
     const customer = input.customer.trim().slice(0, 80);
     const mobile = optionalMobile(input.mobile);
-    const amount = Math.round(Number(input.amount));
+    const serviceCharge = Math.max(0, Math.round(Number(input.serviceCharge) || 0));
+    const departmentPay = Math.max(0, Math.round(Number(input.department) || 0));
+    const split = kind === "credit" && (serviceCharge > 0 || departmentPay > 0);
+    const amount = split ? serviceCharge + departmentPay : Math.round(Number(input.amount));
     if (!kind) throw new Error("Choose credit or debit.");
     if (!customer) throw new Error("Enter the customer name.");
     if (!Number.isFinite(amount) || amount <= 0 || amount > 100000) throw new Error("Enter the amount.");
-    return { kind, customer, mobile, amount };
+    return { kind, customer, mobile, amount, serviceCharge: split ? serviceCharge : 0, department: split ? departmentPay : 0 };
   })
   .handler(async ({ context, data }) => {
     const role = await requireMember(context.userId);
@@ -346,6 +349,12 @@ export const addCustomerMove = createServerFn({ method: "POST" })
       const id = crypto.randomUUID();
       await sql`insert into customer_move (id, taken_on, user_id, staff_name, customer, mobile, kind, amount)
         values (${id}, ${date}, ${context.userId}, ${staff}, ${data.customer}, ${data.mobile}, ${data.kind}, ${data.amount})`;
+      if (data.kind === "credit" && data.serviceCharge > 0) {
+        await ensureServiceTable(sql);
+        await sql`insert into service_entry (id, taken_on, user_id, staff_name, service, customer, mobile, amount, personal_gpay, department, bank_department, pay_mode, cash_part, credit_move_id)
+          values (${crypto.randomUUID()}, ${date}, ${context.userId}, ${staff}, ${"Credit"}, ${data.customer}, ${data.mobile}, ${data.serviceCharge}, ${false}, ${0}, ${0}, ${"credit"}, ${null}, ${id})`;
+        await rollCounterDay(sql, date);
+      }
       await rollCreditDay(sql, date);
       return creditDesk(sql, context.userId, false, date);
     });
@@ -474,10 +483,20 @@ export const removeCustomerMove = createServerFn({ method: "POST" })
     await requireAdmin(context.userId);
     await withTransaction(async (sql) => {
       await ensureCustomerTable(sql);
+      await ensureServiceTable(sql);
       const rows = await sql<{ taken_on: string }>`select taken_on::text as taken_on from customer_move where id = ${id}`;
+      const linked = await sql<{ taken_on: string }>`select taken_on::text as taken_on from service_entry where credit_move_id = ${id}`;
+      await sql`delete from service_entry where credit_move_id = ${id}`;
       await sql`delete from customer_move where id = ${id}`;
       const date = rows[0]?.taken_on?.slice(0, 10);
       if (date) await rollCreditDay(sql, date);
+      const dates = new Set<string>();
+      if (date) dates.add(date);
+      for (const row of linked) {
+        const taken = row.taken_on?.slice(0, 10);
+        if (taken) dates.add(taken);
+      }
+      for (const taken of dates) await rollCounterDay(sql, taken);
       await dropBadCredit(sql, id);
     });
     return { ok: true };
@@ -1493,7 +1512,7 @@ export type ServiceLine = {
   personalGpay: boolean;
   department: number;
   bankDepartment: number;
-  payMode: "" | "cash" | "gpay" | "mixed";
+  payMode: "" | "cash" | "gpay" | "mixed" | "credit";
   cashPart: number | null;
 };
 
@@ -1803,7 +1822,8 @@ export const removeServiceEntry = createServerFn({ method: "POST" })
     await requireAdmin(context.userId);
     await withTransaction(async (sql) => {
       await ensureServiceTable(sql);
-      const rows = await sql<{ taken_on: string }>`select taken_on::text as taken_on from service_entry where id = ${id}`;
+      const rows = await sql<{ taken_on: string; credit_move_id: string | null }>`select taken_on::text as taken_on, credit_move_id from service_entry where id = ${id}`;
+      if (rows[0]?.credit_move_id) throw new Error("This service charge belongs to a credit. Delete the credit, not this line.");
       await sql`delete from service_entry where id = ${id}`;
       await reopenAdvance(sql, id);
       const date = rows[0]?.taken_on?.slice(0, 10);
@@ -1835,10 +1855,11 @@ export const updateServiceEntry = createServerFn({ method: "POST" })
     const role = await requireMember(context.userId);
     await withTransaction(async (sql) => {
       await ensureServiceTable(sql);
-      const rows = await sql<{ user_id: string; taken_on: string }>`
-        select user_id, taken_on::text as taken_on from service_entry where id = ${data.id}`;
+      const rows = await sql<{ user_id: string; taken_on: string; credit_move_id: string | null }>`
+        select user_id, taken_on::text as taken_on, credit_move_id from service_entry where id = ${data.id}`;
       const row = rows[0];
       if (!row) throw new Error("That charge was not found.");
+      if (row.credit_move_id) throw new Error("This service charge belongs to a credit. Change the credit, not this line.");
       if (role === "closer") throw new Error("This login cannot change a charge.");
       if (role === "employee" && row.user_id !== context.userId) throw new Error("You can edit only your own charge.");
       if (role === "employee" && (await dayIsClosed(sql, row.taken_on.slice(0, 10)))) {
@@ -2173,6 +2194,7 @@ async function ensureServiceTable(sql: Awaited<ReturnType<typeof import("@/lib/d
   await sql.query(`alter table service_entry add column if not exists bank_department integer not null default 0`);
   await sql.query(`alter table service_entry add column if not exists pay_mode text not null default ''`);
   await sql.query(`alter table service_entry add column if not exists cash_part integer`);
+  await sql.query(`alter table service_entry add column if not exists credit_move_id text`);
   await sql.query(`create index if not exists service_entry_taken_on on service_entry (taken_on)`);
 }
 
@@ -2603,7 +2625,8 @@ async function readArchiveRecords(sql: SqlClient) {
     bank_department: number;
     pay_mode: string;
     cash_part: number | null;
-  }>`select id, taken_on::text as taken_on, user_id, staff_name, service, customer, mobile, amount, personal_gpay, department, bank_department, pay_mode, cash_part from service_entry order by created_at`;
+    credit_move_id: string | null;
+  }>`select id, taken_on::text as taken_on, user_id, staff_name, service, customer, mobile, amount, personal_gpay, department, bank_department, pay_mode, cash_part, credit_move_id from service_entry order by created_at`;
   const credits = await sql<{
     id: string;
     taken_on: string;
@@ -2649,8 +2672,9 @@ async function readArchiveRecords(sql: SqlClient) {
       personalGpay: Boolean(row.personal_gpay),
       department: Number(row.department) || 0,
       bankDepartment: Number(row.bank_department) || 0,
-      payMode: row.pay_mode === "gpay" || row.pay_mode === "mixed" || row.pay_mode === "cash" ? row.pay_mode : "",
+      payMode: row.pay_mode === "gpay" || row.pay_mode === "mixed" || row.pay_mode === "cash" || row.pay_mode === "credit" ? row.pay_mode : "",
       cashPart: row.cash_part == null ? null : Number(row.cash_part),
+      creditMoveId: row.credit_move_id || "",
     })),
     credits: credits.map((row) => ({
       id: row.id,
@@ -2695,10 +2719,10 @@ async function replaceServices(sql: SqlClient, rows: unknown[], fallbackUser: st
     const date = isoDay(row.date);
     const amount = rupees(row.amount);
     if (!id || !date || amount <= 0) continue;
-    const mode = row.payMode === "gpay" || row.payMode === "mixed" || row.payMode === "cash" ? row.payMode : "";
+    const mode = row.payMode === "gpay" || row.payMode === "mixed" || row.payMode === "cash" || row.payMode === "credit" ? row.payMode : "";
     const cashPart = row.cashPart == null || row.cashPart === "" ? null : rupees(row.cashPart);
-    await sql`insert into service_entry (id, taken_on, user_id, staff_name, service, customer, mobile, amount, personal_gpay, department, bank_department, pay_mode, cash_part)
-      values (${id}, ${date}, ${clip(row.userId, 80) || fallbackUser}, ${clip(row.staff, 80) || "Staff"}, ${clip(row.service, 60)}, ${clip(row.customer, 80)}, ${clip(row.mobile, 15)}, ${amount}, ${Boolean(row.personalGpay)}, ${rupees(row.department)}, ${rupees(row.bankDepartment)}, ${mode}, ${cashPart})
+    await sql`insert into service_entry (id, taken_on, user_id, staff_name, service, customer, mobile, amount, personal_gpay, department, bank_department, pay_mode, cash_part, credit_move_id)
+      values (${id}, ${date}, ${clip(row.userId, 80) || fallbackUser}, ${clip(row.staff, 80) || "Staff"}, ${clip(row.service, 60)}, ${clip(row.customer, 80)}, ${clip(row.mobile, 15)}, ${amount}, ${Boolean(row.personalGpay)}, ${rupees(row.department)}, ${rupees(row.bankDepartment)}, ${mode}, ${cashPart}, ${clip(row.creditMoveId, 80) || null})
       on conflict (id) do nothing`;
   }
 }

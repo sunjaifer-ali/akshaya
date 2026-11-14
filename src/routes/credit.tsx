@@ -33,6 +33,7 @@ function CreditPage() {
   const [customer, setCustomer] = useState("");
   const [mobile, setMobile] = useState("");
   const [amount, setAmount] = useState("");
+  const [department, setDepartment] = useState("");
   const [credit, setCredit] = useState(0);
   const [debit, setDebit] = useState(0);
   const [open, setOpen] = useState<OpenCredit[]>([]);
@@ -276,11 +277,21 @@ function CreditPage() {
           event.preventDefault();
           setPending(true);
           setNotice("");
-          void addCustomerMove({ data: { kind: "credit", customer, mobile, amount: Number(amount) } })
+          void addCustomerMove({
+            data: {
+              kind: "credit",
+              customer,
+              mobile,
+              amount: Number(amount || 0) + Number(department || 0),
+              serviceCharge: Number(amount || 0),
+              department: Number(department || 0),
+            },
+          })
             .then(() => {
               setCustomer("");
               setMobile("");
               setAmount("");
+              setDepartment("");
               setNotice("");
               setResult({ ok: true, message: "Credit successfully saved." });
               load();
@@ -307,14 +318,24 @@ function CreditPage() {
           />
         </label>
         <label className="block text-sm">
-          <span className="mb-1 block text-muted">Amount</span>
+          <span className="mb-1 block text-muted">Service charge</span>
           <input
             inputMode="numeric"
             className="h-11 w-full rounded-sm border border-line bg-bg px-3 text-base outline-none focus:border-accent"
             value={amount}
-            onChange={(event) => setAmount(event.target.value)}
+            onChange={(event) => setAmount(event.target.value.replace(/[^\d]/g, "").slice(0, 7))}
           />
         </label>
+        <label className="block text-sm">
+          <span className="mb-1 block text-muted">Department payment</span>
+          <input
+            inputMode="numeric"
+            className="h-11 w-full rounded-sm border border-line bg-bg px-3 text-base outline-none focus:border-accent"
+            value={department}
+            onChange={(event) => setDepartment(event.target.value.replace(/[^\d]/g, "").slice(0, 7))}
+          />
+        </label>
+        <p className="text-sm text-muted">Credit {inr(Number(amount || 0) + Number(department || 0))}. The service charge is counted in today's collection. Do not enter it again on the counter.</p>
         <Button type="submit" disabled={pending}>
           {pending ? "Saving…" : "Add credit"}
         </Button>

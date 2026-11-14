@@ -372,6 +372,7 @@ function CounterPage() {
 }
 
 function received(line: ServiceLine): { cash: number; gpay: number } {
+  if (line.payMode === "credit") return { cash: 0, gpay: 0 };
   if (line.personalGpay || line.payMode === "gpay") return { cash: 0, gpay: line.amount };
   if (line.payMode === "mixed") {
     const cash = Math.min(line.amount, Math.max(0, Number(line.cashPart) || 0));
@@ -381,6 +382,7 @@ function received(line: ServiceLine): { cash: number; gpay: number } {
 }
 
 function modeWord(line: ServiceLine): string {
+  if (line.payMode === "credit") return "Credit";
   if (line.personalGpay) return "GPay";
   if (line.payMode === "gpay") return "GPay";
   if (line.payMode === "mixed") return `Mixed, cash ${inr(received(line).cash)}`;
@@ -577,7 +579,8 @@ function CounterCredit({ month, onResult }: { month: string; onResult: (result: 
   const [received, setReceived] = useState(0);
   const [customer, setCustomer] = useState("");
   const [mobile, setMobile] = useState("");
-  const [amount, setAmount] = useState("");
+  const [serviceCharge, setServiceCharge] = useState("");
+  const [department, setDepartment] = useState("");
   const [payFor, setPayFor] = useState("");
   const [payAmount, setPayAmount] = useState("");
   const [pending, setPending] = useState(false);
@@ -641,12 +644,22 @@ function CounterCredit({ month, onResult }: { month: string; onResult: (result: 
             onSubmit={(event) => {
               event.preventDefault();
               setPending(true);
-              void addCustomerMove({ data: { kind: "credit", customer, mobile, amount: Number(amount) } })
+              void addCustomerMove({
+                data: {
+                  kind: "credit",
+                  customer,
+                  mobile,
+                  amount: Number(serviceCharge || 0) + Number(department || 0),
+                  serviceCharge: Number(serviceCharge || 0),
+                  department: Number(department || 0),
+                },
+              })
                 .then(() => {
                   setCustomer("");
                   setMobile("");
-                  setAmount("");
-                  onResult({ ok: true, message: "Credit saved." });
+                  setServiceCharge("");
+                  setDepartment("");
+                  onResult({ ok: true, message: "Credit saved. The service charge is in today's collection." });
                   load();
                 })
                 .catch((error: unknown) => onResult({ ok: false, message: error instanceof Error ? error.message : "Credit was not saved." }))
@@ -655,7 +668,9 @@ function CounterCredit({ month, onResult }: { month: string; onResult: (result: 
           >
             <input aria-label="Credit customer" className="h-11 rounded-sm border border-line bg-bg px-3" placeholder="Customer" value={customer} onChange={(event) => setCustomer(event.target.value)} />
             <input aria-label="Credit mobile" inputMode="numeric" className="h-11 rounded-sm border border-line bg-bg px-3" placeholder="Mobile" value={mobile} onChange={(event) => setMobile(event.target.value)} />
-            <input aria-label="Credit amount" inputMode="numeric" className="h-11 rounded-sm border border-line bg-bg px-3" placeholder="Whole bill" value={amount} onChange={(event) => setAmount(event.target.value)} />
+            <input aria-label="Credit service charge" inputMode="numeric" className="h-11 rounded-sm border border-line bg-bg px-3" placeholder="Service charge" value={serviceCharge} onChange={(event) => setServiceCharge(event.target.value.replace(/[^\d]/g, "").slice(0, 7))} />
+            <input aria-label="Credit department payment" inputMode="numeric" className="h-11 rounded-sm border border-line bg-bg px-3" placeholder="Department payment" value={department} onChange={(event) => setDepartment(event.target.value.replace(/[^\d]/g, "").slice(0, 7))} />
+            <p className="text-sm text-muted">Credit {inr(Number(serviceCharge || 0) + Number(department || 0))}. Do not enter this service charge again on the counter.</p>
             <Button type="submit" disabled={pending}>Add credit</Button>
           </form>
         </section>
