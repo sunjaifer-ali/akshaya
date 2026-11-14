@@ -372,7 +372,7 @@ function AdvanceBlock({ month }: { month: string }) {
   const [received, setReceived] = useState(0);
   const [open, setOpen] = useState<OpenAdvance[]>([]);
   const [paid, setPaid] = useState<PaidAdvance[]>([]);
-  const [part, setPart] = useState<Record<string, string>>({});
+  const [part, setPart] = useState<Record<string, { service: string; department: string }>>({});
   const [edit, setEdit] = useState<{ id: string; customer: string; mobile: string; service: string; amount: string } | null>(null);
   const [pending, setPending] = useState(false);
   const [result, setResult] = useState<Result | null>(null);
@@ -471,36 +471,40 @@ function AdvanceBlock({ month }: { month: string }) {
               <span className="text-lg font-medium tabular-nums">{inr(line.amount)}</span>
             </div>
             <div className="mt-2 flex flex-wrap items-center gap-2">
-              <label className="flex items-center gap-2 text-xs text-muted">
-                Amount done
-                <input
-                  aria-label={`Amount served for ${line.customer}`}
-                  inputMode="numeric"
-                  placeholder="Part or full"
-                  className="h-9 w-32 rounded-sm border border-line bg-bg px-3 text-base text-ink outline-none focus:border-accent"
-                  value={part[line.id] ?? ""}
-                  onChange={(event) => setPart((current) => ({ ...current, [line.id]: event.target.value.replace(/[^\d]/g, "") }))}
-                />
-              </label>
+              <input
+                aria-label={`Service charge for ${line.customer}`}
+                inputMode="numeric"
+                placeholder="Service charge"
+                className="h-9 w-36 rounded-sm border border-line bg-bg px-3 text-base text-ink outline-none focus:border-accent"
+                value={part[line.id]?.service ?? ""}
+                onChange={(event) => setPart((current) => ({ ...current, [line.id]: { service: event.target.value.replace(/[^\d]/g, "").slice(0, 7), department: current[line.id]?.department ?? "" } }))}
+              />
+              <input
+                aria-label={`Department payment for ${line.customer}`}
+                inputMode="numeric"
+                placeholder="Department payment"
+                className="h-9 w-40 rounded-sm border border-line bg-bg px-3 text-base text-ink outline-none focus:border-accent"
+                value={part[line.id]?.department ?? ""}
+                onChange={(event) => setPart((current) => ({ ...current, [line.id]: { service: current[line.id]?.service ?? "", department: event.target.value.replace(/[^\d]/g, "").slice(0, 7) } }))}
+              />
               <Button
                 size="sm"
                 disabled={pending}
-                onClick={(event) => {
-                  const field = event.currentTarget.parentElement?.querySelector("input");
-                  const typed = field instanceof HTMLInputElement ? field.value : (part[line.id] ?? "");
-                  const served = Number(typed);
+                onClick={() => {
+                  const serviceCharge = Number(part[line.id]?.service || 0);
+                  const department = Number(part[line.id]?.department || 0);
+                  const served = serviceCharge + department;
                   if (!served || served > line.amount) {
-                    setResult({ ok: false, message: served > line.amount ? "That is more than the advance." : "Enter the amount done. The balance stays in advance." });
+                    setResult({ ok: false, message: served > line.amount ? "That is more than the advance." : "Enter the service charge and the department payment." });
                     return;
                   }
                   setPending(true);
-                  void giveAdvanceService({ data: { id: line.id, amount: served } })
+                  void giveAdvanceService({ data: { id: line.id, serviceCharge, department } })
                     .then((saved) => {
                       const rest = saved.left > 0 ? ` ${inr(saved.left)} still in advance.` : "";
-                      setResult({
-                        ok: true,
-                        message: `Service given.${rest} Reduce the bank or wallet by ${inr(served)}.`,
-                      });
+                      const wallet = department > 0 ? ` Reduce the wallet by ${inr(department)}.` : "";
+                      setResult({ ok: true, message: `Service given.${rest}${wallet} The service charge is in today's collection.` });
+                      setPart((current) => ({ ...current, [line.id]: { service: "", department: "" } }));
                       load();
                     })
                     .catch((error: unknown) => setResult({ ok: false, message: error instanceof Error ? error.message : "Service not entered." }))

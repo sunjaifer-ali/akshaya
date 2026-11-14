@@ -7,7 +7,7 @@ import { chartColors } from "@/lib/chart-colors";
 import { cn } from "@/lib/cn";
 import { inr, signedInr } from "@/lib/format";
 import { diaryDesk, advanceDesk, customerCreditDesk, type OpenCredit } from "@/lib/centre.functions";
-import { accountLines, aewsCollection, checkClose, unpaidCreditReport } from "@/lib/ledger/cash";
+import { accountLines, aewsCollection, checkClose, countStarted, unpaidCreditReport } from "@/lib/ledger/cash";
 import { centreSnapshot, dayOn, DESK_LABEL, deskOf, monthCollection, staffMonthRows } from "@/lib/ledger/calc";
 import { addDays, formatDay, formatFull, formatMonthShort, fyMonths, fyStartYear, isSunday } from "@/lib/ledger/dates";
 import { useLedger } from "@/lib/ledger/store";
@@ -103,61 +103,6 @@ function DeskPage() {
   return (
     <div>
       <PageHeader kicker="DESK" title={book.centreName} lede={today ? formatFull(today) : "Centre book"} />
-
-      <section className="mt-4 rounded-xl border border-line bg-surface p-5">
-        <h2 className="font-display text-2xl">Needs attention</h2>
-        {attention.length > 0 ? (
-          <ul className="mt-2 divide-y divide-line">
-            {attention.map((item) => (
-              <li key={item.text}>
-                <ReviewLink item={item} />
-              </li>
-            ))}
-          </ul>
-        ) : !mounted || oldCredit.length === 0 ? (
-          <p className="mt-2 text-sm text-muted">{mounted ? "Nothing outstanding." : "Checking the book…"}</p>
-        ) : null}
-        <div className="mt-4 flex flex-wrap items-center gap-3 border-t border-line pt-4">
-          <label className="flex items-center gap-2 text-sm">
-            Credit older than
-            <input
-              type="number"
-              min={1}
-              max={365}
-              aria-label="Days before a credit is shown"
-              className="h-11 w-20 rounded-sm border border-line bg-bg px-3 text-right text-base tabular-nums outline-none focus:border-accent"
-              value={warnDays}
-              onChange={(event) => {
-                const next = Math.min(365, Math.max(1, Math.round(Number(event.target.value) || 1)));
-                setWarnDays(next);
-                window.localStorage.setItem("credit-old-days", String(next));
-              }}
-            />
-            days
-          </label>
-          <p className="text-sm font-medium tabular-nums">{oldCredit.length === 0 ? "None" : `${oldCredit.length} · ${inr(oldTotal)}`}</p>
-        </div>
-        {oldCredit.length > 0 ? (
-          <ul className="divide-y divide-line">
-            {oldCredit.slice(0, 8).map((line) => (
-              <li key={`${line.date}-${line.customer}-${line.balance}`}>
-                <ReviewLink
-                  item={{
-                    tone: "bad",
-                    text: `${line.customer || "A customer"} still owes ${inr(line.balance)} from ${formatDay(line.date)}${line.staff ? `, ${line.staff}` : ""}.`,
-                    to: "/credit",
-                  }}
-                />
-              </li>
-            ))}
-            {oldCredit.length > 8 ? (
-              <li>
-                <ReviewLink item={{ tone: "warn", text: `${oldCredit.length - 8} more credits are older than ${warnDays} days.`, to: "/credit" }} />
-              </li>
-            ) : null}
-          </ul>
-        ) : null}
-      </section>
 
       <section className="mt-4 grid gap-3 sm:grid-cols-3">
         <StatusLink
@@ -256,6 +201,61 @@ function DeskPage() {
             Work out salary
           </Link>
         </div>
+      </section>
+
+      <section className="mt-4 rounded-xl border border-line bg-surface p-5">
+        <h2 className="font-display text-2xl">Needs attention</h2>
+        {attention.length > 0 ? (
+          <ul className="mt-2 divide-y divide-line">
+            {attention.map((item) => (
+              <li key={item.text}>
+                <ReviewLink item={item} />
+              </li>
+            ))}
+          </ul>
+        ) : !mounted || oldCredit.length === 0 ? (
+          <p className="mt-2 text-sm text-muted">{mounted ? "Nothing outstanding." : "Checking the book…"}</p>
+        ) : null}
+        <div className="mt-4 flex flex-wrap items-center gap-3 border-t border-line pt-4">
+          <label className="flex items-center gap-2 text-sm">
+            Credit older than
+            <input
+              type="number"
+              min={1}
+              max={365}
+              aria-label="Days before a credit is shown"
+              className="h-11 w-20 rounded-sm border border-line bg-bg px-3 text-right text-base tabular-nums outline-none focus:border-accent"
+              value={warnDays}
+              onChange={(event) => {
+                const next = Math.min(365, Math.max(1, Math.round(Number(event.target.value) || 1)));
+                setWarnDays(next);
+                window.localStorage.setItem("credit-old-days", String(next));
+              }}
+            />
+            days
+          </label>
+          <p className="text-sm font-medium tabular-nums">{oldCredit.length === 0 ? "None" : `${oldCredit.length} · ${inr(oldTotal)}`}</p>
+        </div>
+        {oldCredit.length > 0 ? (
+          <ul className="divide-y divide-line">
+            {oldCredit.slice(0, 8).map((line) => (
+              <li key={`${line.date}-${line.customer}-${line.balance}`}>
+                <ReviewLink
+                  item={{
+                    tone: "bad",
+                    text: `${line.customer || "A customer"} still owes ${inr(line.balance)} from ${formatDay(line.date)}${line.staff ? `, ${line.staff}` : ""}.`,
+                    to: "/credit",
+                  }}
+                />
+              </li>
+            ))}
+            {oldCredit.length > 8 ? (
+              <li>
+                <ReviewLink item={{ tone: "warn", text: `${oldCredit.length - 8} more credits are older than ${warnDays} days.`, to: "/credit" }} />
+              </li>
+            ) : null}
+          </ul>
+        ) : null}
       </section>
     </div>
   );
@@ -363,7 +363,7 @@ function morningReview(
   const yesterday = addDays(today, -1);
   if (!isSunday(yesterday) && !holidays.has(yesterday)) {
     const close = book.cashCloses.find((row) => row.date === yesterday);
-    if (!close) {
+    if (!close || (!countStarted(close) && !close.accepted)) {
       items.push({ tone: "warn", text: "Yesterday was not closed.", to: "/closing", search: { d: yesterday } });
     } else {
       const check = checkClose(close, book.cashCloses, book.days, book.holidays, book.payouts ?? []);

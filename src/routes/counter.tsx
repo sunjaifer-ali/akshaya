@@ -372,7 +372,7 @@ function CounterPage() {
 }
 
 function received(line: ServiceLine): { cash: number; gpay: number } {
-  if (line.payMode === "credit") return { cash: 0, gpay: 0 };
+  if (line.payMode === "credit" || line.payMode === "advance") return { cash: 0, gpay: 0 };
   if (line.personalGpay || line.payMode === "gpay") return { cash: 0, gpay: line.amount };
   if (line.payMode === "mixed") {
     const cash = Math.min(line.amount, Math.max(0, Number(line.cashPart) || 0));
@@ -383,6 +383,7 @@ function received(line: ServiceLine): { cash: number; gpay: number } {
 
 function modeWord(line: ServiceLine): string {
   if (line.payMode === "credit") return "Credit";
+  if (line.payMode === "advance") return "Advance";
   if (line.personalGpay) return "GPay";
   if (line.payMode === "gpay") return "GPay";
   if (line.payMode === "mixed") return `Mixed, cash ${inr(received(line).cash)}`;
@@ -689,7 +690,7 @@ function CounterAdvance({ onResult }: { onResult: (result: Result) => void }) {
   const [mobile, setMobile] = useState("");
   const [service, setService] = useState("");
   const [amount, setAmount] = useState("");
-  const [part, setPart] = useState<Record<string, string>>({});
+  const [part, setPart] = useState<Record<string, { service: string; department: string }>>({});
   const [pending, setPending] = useState(false);
 
   const load = () => {
@@ -736,30 +737,41 @@ function CounterAdvance({ onResult }: { onResult: (result: Result) => void }) {
                 <span className="mt-0.5 block text-xs text-faint">{line.service} · {inr(line.amount)}</span>
               </span>
             </div>
-            <div className="mt-2 flex flex-wrap items-center gap-2">
+            <div className="mt-2 grid gap-2 sm:grid-cols-[1fr_1fr_auto]">
               <input
-                aria-label={`Amount served for ${line.customer}`}
+                aria-label={`Service charge for ${line.customer}`}
                 inputMode="numeric"
-                placeholder="Part or full"
-                className="h-11 w-36 rounded-sm border border-line bg-bg px-3 text-base"
-                value={part[line.id] ?? ""}
-                onChange={(event) => setPart((current) => ({ ...current, [line.id]: event.target.value.replace(/[^\d]/g, "") }))}
+                placeholder="Service charge"
+                className="h-11 rounded-sm border border-line bg-bg px-3 text-base"
+                value={part[line.id]?.service ?? ""}
+                onChange={(event) => setPart((current) => ({ ...current, [line.id]: { service: event.target.value.replace(/[^\d]/g, "").slice(0, 7), department: current[line.id]?.department ?? "" } }))}
+              />
+              <input
+                aria-label={`Department payment for ${line.customer}`}
+                inputMode="numeric"
+                placeholder="Department payment"
+                className="h-11 rounded-sm border border-line bg-bg px-3 text-base"
+                value={part[line.id]?.department ?? ""}
+                onChange={(event) => setPart((current) => ({ ...current, [line.id]: { service: current[line.id]?.service ?? "", department: event.target.value.replace(/[^\d]/g, "").slice(0, 7) } }))}
               />
               <Button
                 size="sm"
                 disabled={pending}
                 onClick={() => {
-                  const served = Number(part[line.id] || 0);
+                  const serviceCharge = Number(part[line.id]?.service || 0);
+                  const department = Number(part[line.id]?.department || 0);
+                  const served = serviceCharge + department;
                   if (!served || served > line.amount) {
-                    onResult({ ok: false, message: served > line.amount ? "That is more than the advance." : "Enter the amount done. The balance stays in advance." });
+                    onResult({ ok: false, message: served > line.amount ? "That is more than the advance." : "Enter the service charge and the department payment." });
                     return;
                   }
                   setPending(true);
-                  void giveAdvanceService({ data: { id: line.id, amount: served } })
+                  void giveAdvanceService({ data: { id: line.id, serviceCharge, department } })
                     .then((saved) => {
                       const rest = saved.left > 0 ? ` ${inr(saved.left)} still in advance.` : "";
-                      onResult({ ok: true, message: `Service given.${rest}` });
-                      setPart((current) => ({ ...current, [line.id]: "" }));
+                      const wallet = department > 0 ? ` Reduce the wallet by ${inr(department)}.` : "";
+                      onResult({ ok: true, message: `Service given.${rest}${wallet} The service charge is in today's collection.` });
+                      setPart((current) => ({ ...current, [line.id]: { service: "", department: "" } }));
                       load();
                     })
                     .catch((error: unknown) => onResult({ ok: false, message: error instanceof Error ? error.message : "The service was not saved." }))

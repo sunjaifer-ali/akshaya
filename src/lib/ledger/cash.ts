@@ -253,10 +253,10 @@ export function checkClose(
   }
   // Credit given, a repayment, an advance received, and a service from that advance
   // belong only to their own date. They are not added again on later days.
-  const creditGiven = creditGivenTotal(row);
-  const creditPaid = creditPaidTotal(row);
-  const advanceIn = typeof row.advanceIn === "number" ? Math.max(0, row.advanceIn) : Math.max(0, gap.advanceChange + (row.advanceServed ?? 0));
-  const advanceServed = row.advanceServed ?? 0;
+  const creditGiven = movementInSpan(closes, row, last.date, creditGivenTotal);
+  const creditPaid = movementInSpan(closes, row, last.date, creditPaidTotal);
+  const advanceIn = movementInSpan(closes, row, last.date, (item) => Math.max(0, item.advanceIn ?? 0));
+  const advanceServed = movementInSpan(closes, row, last.date, (item) => item.advanceServed ?? 0);
   const transfer = row.profitTaken ?? 0;
   const cashIn = Math.max(0, Math.round(row.cashIn ?? 0));
   // A Personal GPay payment lands entirely in the personal account. None of it is expected
@@ -285,6 +285,7 @@ export function checkClose(
     personalBook: idle,
     walletBook: idle,
     advanceIn,
+    advanceServed,
     cashIn,
     missing: [],
     difference,
@@ -297,6 +298,17 @@ export type AccountLine = {
   difference: number;
   unfixed: number;
 };
+
+function movementInSpan(closes: CashClose[], row: CashClose, lastDate: string, read: (item: CashClose) => number): number {
+  const byDate = new Map<string, CashClose>();
+  for (const item of closes) {
+    if (item.date > lastDate && item.date <= row.date) byDate.set(item.date, item);
+  }
+  byDate.set(row.date, row);
+  let total = 0;
+  for (const item of byDate.values()) total += read(item);
+  return total;
+}
 
 export function accountLines(
   closes: CashClose[],

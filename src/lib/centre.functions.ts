@@ -3,7 +3,7 @@ import { authMiddleware } from "@/lib/auth/middleware";
 import type { CashClose, CentrePayout, CollectionDay, LedgerData } from "@/lib/ledger/types";
 import { PAYOUT_KINDS, withCategories } from "@/lib/ledger/types";
 import { addDays, isSunday } from "@/lib/ledger/dates";
-import { countStarted } from "@/lib/ledger/cash";
+import { countStarted, emptyNotes } from "@/lib/ledger/cash";
 import { centreEmail, cleanUsername } from "@/lib/username";
 import { withTransaction } from "@/lib/db";
 
@@ -302,7 +302,7 @@ function paySplit(amount: number, mode: unknown, cashPart: unknown, personalGpay
 
 function shapeServiceLine(line: ServiceLine): ServiceLine {
   const amount = Number(line.amount);
-  const payMode = line.payMode === "gpay" || line.payMode === "mixed" || line.payMode === "cash" || line.payMode === "credit" ? line.payMode : "";
+  const payMode = line.payMode === "gpay" || line.payMode === "mixed" || line.payMode === "cash" || line.payMode === "credit" || line.payMode === "advance" ? line.payMode : "";
   const raw = line.cashPart as number | string | null | undefined;
   const cashPart = raw == null || raw === "" ? null : Number(raw);
   return {
@@ -339,8 +339,8 @@ export const addCustomerMove = createServerFn({ method: "POST" })
     const date = indiaToday();
     return withTransaction(async (sql) => {
       await ensureCustomerTable(sql);
-      const open = await openCredits(sql);
       if (data.kind === "debit") {
+        const open = await openCredits(sql);
         const due = open.find((line) => line.customer.toLowerCase() === data.customer.toLowerCase());
         if (!due || due.balance < data.amount) throw new Error("That customer does not owe this much.");
       }
@@ -353,10 +353,9 @@ export const addCustomerMove = createServerFn({ method: "POST" })
         await ensureServiceTable(sql);
         await sql`insert into service_entry (id, taken_on, user_id, staff_name, service, customer, mobile, amount, personal_gpay, department, bank_department, pay_mode, cash_part, credit_move_id)
           values (${crypto.randomUUID()}, ${date}, ${context.userId}, ${staff}, ${"Credit"}, ${data.customer}, ${data.mobile}, ${data.serviceCharge}, ${false}, ${0}, ${0}, ${"credit"}, ${null}, ${id})`;
-        await rollCounterDay(sql, date);
       }
-      await rollCreditDay(sql, date);
-      return creditDesk(sql, context.userId, false, date);
+      await rollCreditSave(sql, date, data.kind === "credit" && data.serviceCharge > 0);
+      return { ok: true };
     });
   });
 
@@ -514,7 +513,10 @@ function dayText(value: unknown): string {
   return found ? found[0] : text.slice(0, 10);
 }
 
+let customerTableReady = false;
+
 async function ensureCustomerTable(sql: Awaited<ReturnType<typeof import("@/lib/db").getSql>>) {
+  if (customerTableReady) return;
   await sql.query(
     `create table if not exists customer_move (
       id text primary key,
@@ -529,12 +531,15 @@ async function ensureCustomerTable(sql: Awaited<ReturnType<typeof import("@/lib/
     )`,
   );
   await sql.query(`create index if not exists customer_move_taken_on on customer_move (taken_on)`);
+  customerTableReady = true;
 }
 
 type OpenRow = { key: string; customer: string; mobile: string; staff: string; balance: number; date: string };
 
-function creditKey(name: string): string {
-  return name.trim().toLowerCase().replace(/\s+/g, " ");
+function creditKey(name: string, mobile = ""): string {
+  const base = name.trim().toLowerCase().replace(/\s+/g, " ");
+  const digits = mobile.replace(/\D/g, "");
+  return digits ? `${base}|${digits}` : base;
 }
 
 function addOpenCredit(
@@ -543,7 +548,7 @@ function addOpenCredit(
 ) {
   const amount = Math.round(item.amount);
   if (amount <= 0) return;
-  const key = creditKey(item.customer);
+  const key = creditKey(item.customer, item.mobile);
   if (!key) return;
   const existing = lines.find((line) => line.key === key);
   if (existing) {
@@ -556,11 +561,11 @@ function addOpenCredit(
   lines.push({ key, customer: item.customer.trim(), mobile: item.mobile, staff: item.staff, balance: amount, date: item.date });
 }
 
-function payOpenCredit(lines: OpenRow[], name: string, amount: number, date: string) {
+function payOpenCredit(lines: OpenRow[], name: string, amount: number, date: string, mobile = "") {
   let left = Math.round(amount);
   if (left <= 0) return;
   const started = left;
-  const key = creditKey(name);
+  const key = creditKey(name, mobile);
   const open = () => lines.filter((line) => line.balance > 0);
   const named = key ? open().filter((line) => line.key === key) : [];
   const ordered = [...named.filter((line) => line.date === date), ...named.filter((line) => line.date !== date)];
@@ -571,11 +576,8 @@ function payOpenCredit(lines: OpenRow[], name: string, amount: number, date: str
     left -= take;
   }
   if (left !== started) return;
-  const sameDay = open().filter((line) => line.date === date && line.balance === left);
-  const only = key ? sameDay.filter((line) => line.key === key) : sameDay;
-  if ((only.length === 1 ? only : sameDay).length === 1) {
-    (only.length === 1 ? only : sameDay)[0].balance = 0;
-  }
+  const same = open().filter((line) => line.key === key && line.date === date && line.balance === left);
+  if (same.length === 1) same[0].balance = 0;
 }
 
 function foldCredits(
@@ -624,11 +626,11 @@ function foldCredits(
     }
     const payments =
       debits.length > 0
-        ? debits.map((move) => ({ name: move.customer, amount: Number(move.amount) || 0 }))
+        ? debits.map((move) => ({ name: move.customer, mobile: move.mobile, amount: Number(move.amount) || 0 }))
         : (close?.creditPaid ?? []).map((item) => ({ name: item.name ?? "", amount: item.amount || 0 }));
-    for (const item of payments) payOpenCredit(lines, item.name, item.amount, date);
+    for (const item of payments) payOpenCredit(lines, item.name, item.amount, date, "mobile" in item ? String(item.mobile ?? "") : "");
     for (const move of dayMoves.filter((item) => item.kind === "writeoff")) {
-      payOpenCredit(lines, move.customer, Number(move.amount) || 0, date);
+      payOpenCredit(lines, move.customer, Number(move.amount) || 0, date, move.mobile);
     }
   }
   return lines;
@@ -692,27 +694,67 @@ async function creditDesk(
   };
 }
 
+function shellClose(date: string): CashClose {
+  return {
+    date,
+    notes: emptyNotes(),
+    eDistrict: 0,
+    csc: 0,
+    credits: 0,
+    bank: 0,
+    fixed: 0,
+    creditPaid: [],
+    creditGiven: [],
+    countedBy: "",
+    accepted: false,
+    creditSeparate: true,
+    advanceHeld: 0,
+    advanceServed: 0,
+    advanceIn: 0,
+    profitTaken: 0,
+    profitNote: "",
+    cashIn: 0,
+    cashInNote: "",
+  };
+}
+
 async function rollCreditDay(sql: Awaited<ReturnType<typeof import("@/lib/db").getSql>>, date: string) {
+  await rollCreditSave(sql, date, false);
+}
+
+async function rollCreditSave(sql: Awaited<ReturnType<typeof import("@/lib/db").getSql>>, date: string, withCounter: boolean) {
   const current = await sql<{ data: LedgerData | string; touches: Record<string, string> | string }>`
     select data, touches from centre_book where id = 'centre' for update
   `;
   const row = readRow(current[0]);
   if (!row) return;
-  const close = (row.data.cashCloses ?? []).find((item) => item.date === date);
-  if (!close) return;
-  const position = await positionAsOf(sql, date);
-  const cashCloses = (row.data.cashCloses ?? []).map((item) =>
-    item.date === date
-      ? { ...item, creditGiven: position.given, creditPaid: position.paid, credits: position.unpaid }
-      : item,
-  );
-  const touches = { ...row.touches, [date]: new Date().toISOString() };
-  await writeBook(sql, { ...row.data, cashCloses }, touches);
+  let book = row.data;
+  const touches = { ...row.touches };
+  if (withCounter) {
+    const synced = await resyncCounterSplits(sql, book, date);
+    book = synced.book;
+    touches[`day:${date}`] = new Date().toISOString();
+  }
+  const close = (book.cashCloses ?? []).find((item) => item.date === date);
+  if (!close) {
+    book = { ...book, cashCloses: [...(book.cashCloses ?? []), shellClose(date)] };
+  }
+  const position = await positionAsOf(sql, date, book);
+  book = {
+    ...book,
+    cashCloses: (book.cashCloses ?? []).map((item) =>
+      item.date === date ? { ...item, creditGiven: position.given, creditPaid: position.paid, credits: position.unpaid } : item,
+    ),
+  };
+  touches[date] = new Date().toISOString();
+  await writeBook(sql, book, touches);
 }
 
-async function positionAsOf(sql: Awaited<ReturnType<typeof import("@/lib/db").getSql>>, asOf: string) {
-  const bookRow = await sql<{ data: LedgerData | string }>`select data from centre_book where id = 'centre'`;
-  const book = bookRow[0] ? asJson(bookRow[0].data) : null;
+async function positionAsOf(sql: Awaited<ReturnType<typeof import("@/lib/db").getSql>>, asOf: string, known?: LedgerData | null) {
+  const book = known ?? (await (async () => {
+    const bookRow = await sql<{ data: LedgerData | string }>`select data from centre_book where id = 'centre'`;
+    return bookRow[0] ? asJson(bookRow[0].data) : null;
+  })());
   const employees = book?.employees ?? [];
   const names = new Map(employees.map((employee) => [employee.id, employee.name]));
   const moves = await sql<{ taken_on: string; customer: string; mobile: string; staff_name: string; kind: string; amount: number }>`
@@ -912,12 +954,15 @@ export const addAdvance = createServerFn({ method: "POST" })
 
 export const giveAdvanceService = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
-  .validator((input: { id: string; amount: number }) => {
+  .validator((input: { id: string; amount?: number; serviceCharge?: number; department?: number }) => {
     const id = input.id.trim();
-    const amount = Math.round(Number(input.amount));
+    const serviceCharge = Math.max(0, Math.round(Number(input.serviceCharge) || 0));
+    const departmentPay = Math.max(0, Math.round(Number(input.department) || 0));
+    const split = serviceCharge > 0 || departmentPay > 0;
+    const amount = split ? serviceCharge + departmentPay : Math.round(Number(input.amount));
     if (!id) throw new Error("That advance was not found.");
-    if (!Number.isFinite(amount) || amount <= 0 || amount > 100000) throw new Error("Enter the amount served.");
-    return { id, amount };
+    if (!Number.isFinite(amount) || amount <= 0 || amount > 100000) throw new Error("Enter the service charge and the department payment.");
+    return { id, amount, serviceCharge: split ? serviceCharge : 0, department: split ? departmentPay : 0 };
   })
   .handler(async ({ context, data }) => {
     await requireMember(context.userId);
@@ -934,7 +979,7 @@ export const giveAdvanceService = createServerFn({ method: "POST" })
       const full = Number(advance.amount);
       if (data.amount > full) throw new Error("That is more than the advance.");
       const taken = String(advance.taken_on).slice(0, 10);
-      if (role === "employee" && taken === date && (await dayIsClosed(sql, date))) {
+      if (role === "employee" && (await dayIsClosed(sql, date))) {
         throw new Error("This day is closed. A new day starts tomorrow.");
       }
       const served = data.amount;
@@ -944,7 +989,17 @@ export const giveAdvanceService = createServerFn({ method: "POST" })
         await sql`insert into customer_advance (id, taken_on, user_id, staff_name, customer, mobile, service, amount)
           values (${crypto.randomUUID()}, ${taken}, ${advance.user_id}, ${advance.staff_name}, ${advance.customer}, ${advance.mobile}, ${advance.service}, ${left})`;
       }
-      await sql`update customer_advance set used_on = ${date}, used_entry_id = null where id = ${data.id}`;
+      let entryId: string | null = null;
+      if (data.serviceCharge > 0) {
+        await ensureServiceTable(sql);
+        const member = await sql<{ name: string }>`select name from centre_member where user_id = ${context.userId}`;
+        const staff = (member[0]?.name || advance.staff_name || "Staff").trim().slice(0, 80);
+        entryId = crypto.randomUUID();
+        await sql`insert into service_entry (id, taken_on, user_id, staff_name, service, customer, mobile, amount, personal_gpay, department, bank_department, pay_mode, cash_part, credit_move_id)
+          values (${entryId}, ${date}, ${context.userId}, ${staff}, ${advance.service}, ${advance.customer}, ${advance.mobile}, ${data.serviceCharge}, ${false}, ${0}, ${0}, ${"advance"}, ${null}, ${null})`;
+      }
+      await sql`update customer_advance set used_on = ${date}, used_entry_id = ${entryId} where id = ${data.id}`;
+      if (entryId) await rollCounterDay(sql, date);
       await stampAdvanceHeld(sql);
       return { countedToday: false, left };
     });
@@ -1115,9 +1170,23 @@ async function stampAdvanceHeld(sql: Awaited<ReturnType<typeof import("@/lib/db"
   const advances = await sql<{ taken_on: string; used_on: string | null; amount: number }>`
     select taken_on::text as taken_on, used_on::text as used_on, amount from customer_advance
   `;
-  const ordered = [...(data.cashCloses ?? [])].sort((a, b) => (a.date < b.date ? -1 : 1));
+  const have = new Set((data.cashCloses ?? []).map((close) => close.date));
+  const first = [...have].sort()[0] ?? "";
+  const today = indiaToday();
+  const shells: CashClose[] = [];
+  for (const item of advances) {
+    const taken = String(item.taken_on).slice(0, 10);
+    const used = item.used_on ? String(item.used_on).slice(0, 10) : "";
+    for (const date of [taken, used]) {
+      if (!date || have.has(date)) continue;
+      if (first ? date < first : date !== today) continue;
+      have.add(date);
+      shells.push(shellClose(date));
+    }
+  }
+  const ordered = [...(data.cashCloses ?? []), ...shells].sort((a, b) => (a.date < b.date ? -1 : 1));
   let previous = "";
-  let changed = false;
+  let changed = shells.length > 0;
   const cashCloses = ordered.map((close) => {
     const held = heldOn(advances, close.date);
     const served = servedSince(advances, previous, close.date);
@@ -1176,11 +1245,11 @@ async function releaseAdvanceCharges(sql: Awaited<ReturnType<typeof import("@/li
     select e.taken_on::text as taken_on
     from customer_advance a
     join service_entry e on e.id = a.used_entry_id
-    where a.used_entry_id is not null
+    where a.used_entry_id is not null and e.pay_mode <> 'advance'
   `;
   if (rows.length === 0) return [];
-  await sql`delete from service_entry where id in (select used_entry_id from customer_advance where used_entry_id is not null)`;
-  await sql`update customer_advance set used_entry_id = null where used_entry_id is not null`;
+  await sql`delete from service_entry e using customer_advance a where a.used_entry_id = e.id and e.pay_mode <> 'advance'`;
+  await sql`update customer_advance a set used_entry_id = null where a.used_entry_id is not null and not exists (select 1 from service_entry e where e.id = a.used_entry_id)`;
   const dates = [...new Set(rows.map((row) => String(row.taken_on).slice(0, 10)))];
   await rollCounterDay(sql, dates[0] ?? indiaToday());
   return dates;
@@ -1512,7 +1581,7 @@ export type ServiceLine = {
   personalGpay: boolean;
   department: number;
   bankDepartment: number;
-  payMode: "" | "cash" | "gpay" | "mixed" | "credit";
+  payMode: "" | "cash" | "gpay" | "mixed" | "credit" | "advance";
   cashPart: number | null;
 };
 
@@ -1855,11 +1924,12 @@ export const updateServiceEntry = createServerFn({ method: "POST" })
     const role = await requireMember(context.userId);
     await withTransaction(async (sql) => {
       await ensureServiceTable(sql);
-      const rows = await sql<{ user_id: string; taken_on: string; credit_move_id: string | null }>`
-        select user_id, taken_on::text as taken_on, credit_move_id from service_entry where id = ${data.id}`;
+      const rows = await sql<{ user_id: string; taken_on: string; credit_move_id: string | null; pay_mode: string }>`
+        select user_id, taken_on::text as taken_on, credit_move_id, pay_mode from service_entry where id = ${data.id}`;
       const row = rows[0];
       if (!row) throw new Error("That charge was not found.");
       if (row.credit_move_id) throw new Error("This service charge belongs to a credit. Change the credit, not this line.");
+      if (row.pay_mode === "advance") throw new Error("This service charge belongs to an advance. Delete the line and enter the service again.");
       if (role === "closer") throw new Error("This login cannot change a charge.");
       if (role === "employee" && row.user_id !== context.userId) throw new Error("You can edit only your own charge.");
       if (role === "employee" && (await dayIsClosed(sql, row.taken_on.slice(0, 10)))) {
@@ -2076,34 +2146,6 @@ async function resyncCounterSplits(
       `;
   const bankByDate = new Map(bankRows.map((entry) => [String(entry.taken_on).slice(0, 10), Number(entry.amount) || 0]));
   if (!onlyDate && rows.length === 0) return { book, dates: [] };
-  await ensureCustomerTable(sql);
-  const creditRows = onlyDate
-    ? await sql<{ taken_on: string; amount: number }>`
-        select s.taken_on::text as taken_on, coalesce(sum(s.amount), 0)::int as amount
-        from service_entry s
-        where s.taken_on = ${onlyDate}
-          and not s.personal_gpay
-          and exists (
-            select 1 from customer_move m
-            where m.kind = 'credit'
-              and m.taken_on = s.taken_on
-              and lower(trim(m.customer)) = lower(trim(s.customer))
-          )
-        group by s.taken_on
-      `
-    : await sql<{ taken_on: string; amount: number }>`
-        select s.taken_on::text as taken_on, coalesce(sum(s.amount), 0)::int as amount
-        from service_entry s
-        where not s.personal_gpay
-          and exists (
-            select 1 from customer_move m
-            where m.kind = 'credit'
-              and m.taken_on = s.taken_on
-              and lower(trim(m.customer)) = lower(trim(s.customer))
-          )
-        group by s.taken_on
-      `;
-  const creditByDate = new Map(creditRows.map((entry) => [String(entry.taken_on).slice(0, 10), Number(entry.amount) || 0]));
   const departmentByDate = new Map(gpayRows.map((entry) => [String(entry.taken_on).slice(0, 10), Number(entry.department) || 0]));
   const byDate = new Map<string, { amount: number; splits: Record<string, number>; personalGpay: number; departmentGpay: number; bankDepartment: number }>();
   for (const entry of rows) {
@@ -2117,7 +2159,6 @@ async function resyncCounterSplits(
   }
   if (onlyDate) {
     const fresh = byDate.get(onlyDate);
-    const creditService = creditByDate.get(onlyDate) ?? 0;
     const previous = (book.days ?? []).filter((day) => day.date === onlyDate);
     const days = (book.days ?? []).filter((day) => day.date !== onlyDate);
     if (fresh && fresh.amount > 0) {
@@ -2129,12 +2170,11 @@ async function resyncCounterSplits(
         personalGpay: fresh.personalGpay,
         departmentGpay: fresh.departmentGpay,
         bankDepartment: fresh.bankDepartment,
-        creditService,
       });
     } else {
       for (const day of previous) {
         if (day.note.startsWith("Entered on the counter")) continue;
-        days.push({ ...day, personalGpay: fresh?.personalGpay ?? day.personalGpay, departmentGpay: fresh?.departmentGpay ?? day.departmentGpay, bankDepartment: fresh?.bankDepartment ?? day.bankDepartment, creditService });
+        days.push({ ...day, personalGpay: fresh?.personalGpay ?? day.personalGpay, departmentGpay: fresh?.departmentGpay ?? day.departmentGpay, bankDepartment: fresh?.bankDepartment ?? day.bankDepartment });
       }
     }
     days.sort((a, b) => (a.date < b.date ? -1 : 1));
@@ -2147,17 +2187,16 @@ async function resyncCounterSplits(
     const fresh = byDate.get(day.date);
     if (!fresh) return day.note.startsWith("Entered on the counter") ? [] : [day];
     seen.add(day.date);
-    const creditService = creditByDate.get(day.date) ?? 0;
     if (!day.note.startsWith("Entered on the counter")) {
-      if (fresh.amount <= 0) return [{ ...day, personalGpay: fresh.personalGpay, departmentGpay: fresh.departmentGpay, bankDepartment: fresh.bankDepartment, creditService }];
-      return [{ ...day, amount: fresh.amount, note: "Entered on the counter", splits: fresh.splits, personalGpay: fresh.personalGpay, departmentGpay: fresh.departmentGpay, bankDepartment: fresh.bankDepartment, creditService }];
+      if (fresh.amount <= 0) return [{ ...day, personalGpay: fresh.personalGpay, departmentGpay: fresh.departmentGpay, bankDepartment: fresh.bankDepartment }];
+      return [{ ...day, amount: fresh.amount, note: "Entered on the counter", splits: fresh.splits, personalGpay: fresh.personalGpay, departmentGpay: fresh.departmentGpay, bankDepartment: fresh.bankDepartment }];
     }
     if (fresh.amount <= 0) return [];
-    return [{ ...day, amount: fresh.amount, splits: fresh.splits, personalGpay: fresh.personalGpay, departmentGpay: fresh.departmentGpay, bankDepartment: fresh.bankDepartment, creditService }];
+    return [{ ...day, amount: fresh.amount, splits: fresh.splits, personalGpay: fresh.personalGpay, departmentGpay: fresh.departmentGpay, bankDepartment: fresh.bankDepartment }];
   });
   for (const [date, fresh] of byDate) {
     if (seen.has(date) || fresh.amount <= 0) continue;
-    days.push({ date, amount: fresh.amount, note: "Entered on the counter", splits: fresh.splits, personalGpay: fresh.personalGpay, departmentGpay: fresh.departmentGpay, bankDepartment: fresh.bankDepartment, creditService: creditByDate.get(date) ?? 0 });
+    days.push({ date, amount: fresh.amount, note: "Entered on the counter", splits: fresh.splits, personalGpay: fresh.personalGpay, departmentGpay: fresh.departmentGpay, bankDepartment: fresh.bankDepartment });
   }
   const uniqueDays = new Map<string, CollectionDay>();
   for (const day of days) uniqueDays.set(day.date, day);
@@ -2175,7 +2214,10 @@ function indiaToday(): string {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(new Date());
 }
 
+let serviceTableReady = false;
+
 async function ensureServiceTable(sql: Awaited<ReturnType<typeof import("@/lib/db").getSql>>) {
+  if (serviceTableReady) return;
   await sql.query(
     `create table if not exists service_entry (
       id text primary key,
@@ -2196,6 +2238,7 @@ async function ensureServiceTable(sql: Awaited<ReturnType<typeof import("@/lib/d
   await sql.query(`alter table service_entry add column if not exists cash_part integer`);
   await sql.query(`alter table service_entry add column if not exists credit_move_id text`);
   await sql.query(`create index if not exists service_entry_taken_on on service_entry (taken_on)`);
+  serviceTableReady = true;
 }
 
 export const saveSharedBook = createServerFn({ method: "POST" })
@@ -2672,7 +2715,7 @@ async function readArchiveRecords(sql: SqlClient) {
       personalGpay: Boolean(row.personal_gpay),
       department: Number(row.department) || 0,
       bankDepartment: Number(row.bank_department) || 0,
-      payMode: row.pay_mode === "gpay" || row.pay_mode === "mixed" || row.pay_mode === "cash" || row.pay_mode === "credit" ? row.pay_mode : "",
+      payMode: row.pay_mode === "gpay" || row.pay_mode === "mixed" || row.pay_mode === "cash" || row.pay_mode === "credit" || row.pay_mode === "advance" ? row.pay_mode : "",
       cashPart: row.cash_part == null ? null : Number(row.cash_part),
       creditMoveId: row.credit_move_id || "",
     })),
@@ -2719,7 +2762,7 @@ async function replaceServices(sql: SqlClient, rows: unknown[], fallbackUser: st
     const date = isoDay(row.date);
     const amount = rupees(row.amount);
     if (!id || !date || amount <= 0) continue;
-    const mode = row.payMode === "gpay" || row.payMode === "mixed" || row.payMode === "cash" || row.payMode === "credit" ? row.payMode : "";
+    const mode = row.payMode === "gpay" || row.payMode === "mixed" || row.payMode === "cash" || row.payMode === "credit" || row.payMode === "advance" ? row.payMode : "";
     const cashPart = row.cashPart == null || row.cashPart === "" ? null : rupees(row.cashPart);
     await sql`insert into service_entry (id, taken_on, user_id, staff_name, service, customer, mobile, amount, personal_gpay, department, bank_department, pay_mode, cash_part, credit_move_id)
       values (${id}, ${date}, ${clip(row.userId, 80) || fallbackUser}, ${clip(row.staff, 80) || "Staff"}, ${clip(row.service, 60)}, ${clip(row.customer, 80)}, ${clip(row.mobile, 15)}, ${amount}, ${Boolean(row.personalGpay)}, ${rupees(row.department)}, ${rupees(row.bankDepartment)}, ${mode}, ${cashPart}, ${clip(row.creditMoveId, 80) || null})

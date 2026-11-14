@@ -96,6 +96,7 @@ function ExpensesPage() {
         <Tile label="Self expenses" value={inr(self)} note="Counted as margin" />
         <Tile label="Margin" value={collection > 0 ? inr(margin) : "—"} note="Collection − expenses − salary" />
       </section>
+      <p className="mt-3 text-sm text-muted">This page changes the margin only. If the money left the drawer, enter it under Payments as well. Do not enter the same bill in both places.</p>
 
       <form
         className="mt-4 rounded-xl border border-line bg-surface p-4"
