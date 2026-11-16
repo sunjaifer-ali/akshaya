@@ -178,8 +178,7 @@ function CreditPage() {
                     size="sm"
                     variant="secondary"
                     onClick={() => {
-                      const key = `${line.customer}|${line.mobile}`;
-                      setPayFor(key);
+                      setPayFor(line.customer);
                       setWriteFor("");
                       setPayAmount(String(line.balance));
                       setPayMobile(line.mobile);
@@ -193,7 +192,7 @@ function CreditPage() {
                       size="sm"
                       variant="secondary"
                       onClick={() => {
-                        setWriteFor(`${line.customer}|${line.mobile}`);
+                        setWriteFor(line.customer);
                         setPayFor("");
                       }}
                     >
@@ -202,7 +201,7 @@ function CreditPage() {
                   ) : null}
                 </span>
               </div>
-              {payFor === `${line.customer}|${line.mobile}` ? (
+              {payFor === line.customer ? (
                 <form
                   className="mt-2 grid gap-2 sm:grid-cols-[8rem_1fr_auto]"
                   onSubmit={(event) => {
@@ -241,13 +240,13 @@ function CreditPage() {
                   </Button>
                 </form>
               ) : null}
-              {writeFor === `${line.customer}|${line.mobile}` ? (
+              {writeFor === line.customer ? (
                 <form
                   className="mt-2 flex flex-wrap items-center gap-2"
                   onSubmit={(event) => {
                     event.preventDefault();
                     setPending(true);
-                    void writeOffCredit({ data: { customer: line.customer, mobile: line.mobile, amount: line.balance } })
+                    void writeOffCredit({ data: { customer: line.customer, amount: line.balance } })
                       .then(() => {
                         setWriteFor("");
                         setResult({ ok: true, message: "Written off as bad credit. It is no longer unpaid, and it is not counted as cash received." });
@@ -310,7 +309,7 @@ function CreditPage() {
           />
         </label>
         <label className="block text-sm">
-          <span className="mb-1 block text-muted">Mobile</span>
+          <span className="mb-1 block text-muted">Mobile, if any</span>
           <input
             inputMode="numeric"
             className="h-11 w-full rounded-sm border border-line bg-bg px-3 text-base outline-none focus:border-accent"
