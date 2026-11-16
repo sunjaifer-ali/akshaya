@@ -489,6 +489,7 @@ export const removeCustomerMove = createServerFn({ method: "POST" })
       const linked = await sql<{ taken_on: string }>`select taken_on::text as taken_on from service_entry where credit_move_id = ${id}`;
       await sql`delete from service_entry where credit_move_id = ${id}`;
       await sql`delete from customer_move where id = ${id}`;
+      creditHealAt = 0;
       const date = rows[0]?.taken_on?.slice(0, 10);
       if (date) await rollCreditDay(sql, date);
       const dates = new Set<string>();
@@ -659,20 +660,36 @@ function earliestMove(dates: string[]): string {
   return first;
 }
 
+let creditHealAt = 0;
+
 async function healStaleCredits(sql: Awaited<ReturnType<typeof import("@/lib/db").getSql>>) {
+  if (Date.now() - creditHealAt < 10 * 60 * 1000) return;
+  creditHealAt = Date.now();
+  const preview = await sql<{ data: LedgerData | string }>`select data from centre_book where id = 'centre'`;
+  const seen = preview[0] ? asJson(preview[0].data) : null;
+  if (!seen || !(await staleCreditCopy(sql, seen))) return;
   const current = await sql<{ data: LedgerData | string; touches: Record<string, string> | string }>`
     select data, touches from centre_book where id = 'centre' for update
   `;
   const row = readRow(current[0]);
   if (!row) return;
-  const moves = await sql<{ taken_on: string; kind: string }>`
-    select taken_on::text as taken_on, kind from customer_move
-  `;
+  const cleaned = await staleCreditCopy(sql, row.data);
+  if (!cleaned) return;
+  await writeBook(sql, cleaned, row.touches);
+}
+
+async function staleCreditCopy(
+  sql: Awaited<ReturnType<typeof import("@/lib/db").getSql>>,
+  book: LedgerData,
+): Promise<LedgerData | null> {
+  const closes = book.cashCloses ?? [];
+  if (closes.length === 0) return null;
+  const moves = await sql<{ taken_on: string; kind: string }>`select taken_on::text as taken_on, kind from customer_move`;
   const first = earliestMove(moves.map((move) => move.taken_on));
   const creditDates = new Set(moves.filter((move) => move.kind === "credit").map((move) => dayText(move.taken_on)));
   const debitDates = new Set(moves.filter((move) => move.kind === "debit").map((move) => dayText(move.taken_on)));
   let changed = false;
-  const cashCloses = (row.data.cashCloses ?? []).map((close) => {
+  const cashCloses = closes.map((close) => {
     const tracked = Boolean(close.creditSeparate) || Boolean(first && close.date >= first);
     if (!tracked) return close;
     let next = close;
@@ -686,8 +703,7 @@ async function healStaleCredits(sql: Awaited<ReturnType<typeof import("@/lib/db"
     }
     return next;
   });
-  if (!changed) return;
-  await writeBook(sql, { ...row.data, cashCloses }, row.touches);
+  return changed ? { ...book, cashCloses } : null;
 }
 
 async function openCredits(sql: Awaited<ReturnType<typeof import("@/lib/db").getSql>>): Promise<OpenCredit[]> {
@@ -1709,7 +1725,7 @@ export const personalGpayMonth = createServerFn({ method: "GET" })
     return month;
   })
   .handler(async ({ context, data: month }) => {
-    await requireMember(context.userId);
+    await requireAdmin(context.userId);
     const { getSql } = await import("@/lib/db");
     const sql = await getSql();
     await ensureServiceTable(sql);
@@ -1928,9 +1944,6 @@ export const serviceDay = createServerFn({ method: "GET" })
       const lines = rows.map(shapeServiceLine);
       return { role, total: lines.reduce((sum, line) => sum + line.amount, 0), lines, closed };
     }
-    await withTransaction(async (tx) => {
-      await rollCounterDay(tx, date);
-    });
     const lines = await sql<ServiceLine>`
       select id, staff_name as staff, service, customer, mobile, amount, personal_gpay as "personalGpay", department, bank_department as "bankDepartment", pay_mode as "payMode", cash_part as "cashPart"
       from service_entry where taken_on = ${date} order by created_at desc`;

@@ -10,7 +10,7 @@ import { addDays, formatDay, formatMonthShort, fyLabel, fyMonths, fyStartYear } 
 import { loginLog } from "@/lib/centre.functions";
 import { downloadWorkbook, type Sheet } from "@/lib/excel";
 import { useLedger } from "@/lib/ledger/store";
-import type { Employee, LedgerData } from "@/lib/ledger/types";
+import { expenseKindLabel, payoutLabel, type Employee, type LedgerData } from "@/lib/ledger/types";
 import { readReport, type ReportKind } from "@/lib/search";
 import { useTodayKey } from "@/lib/use-today";
 
@@ -26,6 +26,7 @@ const MENU: { id: ReportKind; label: string }[] = [
   { id: "leave", label: "Leave" },
   { id: "transfers", label: "Transfers" },
   { id: "logins", label: "Logins" },
+  { id: "accountant", label: "Accountant" },
 ];
 
 function ReportsPage() {
@@ -73,12 +74,19 @@ function ReportsPage() {
   }));
 
   const [excelNote, setExcelNote] = useState("");
+  const [accountMonth, setAccountMonth] = useState("");
+  const [accountYear, setAccountYear] = useState(false);
+  const pickedMonth = months.includes(accountMonth)
+    ? accountMonth
+    : today && months.includes(today.slice(0, 7))
+      ? today.slice(0, 7)
+      : months[months.length - 1];
   const go = (nextFy: number, nextKind: ReportKind, nextDate = logDate) => {
     void navigate({ search: { fy: String(nextFy), r: nextKind, d: nextDate || undefined } });
   };
   const saveExcel = () => {
     setExcelNote("");
-    void buildReportWorkbook(kind, fyLabel(fy), logDate, shown, people, book)
+    void buildReportWorkbook(kind, fyLabel(fy), logDate, shown, people, book, pickedMonth, today || "", accountYear, months)
       .then((file) => downloadWorkbook(file.name, file.sheets))
       .then(() => setExcelNote("Excel file downloaded."))
       .catch((error: unknown) => setExcelNote(error instanceof Error ? error.message : "Excel file was not created."));
@@ -157,6 +165,8 @@ function ReportsPage() {
         <LoginStatement date={logDate} />
       ) : kind === "transfers" ? (
         <TransferStatement fy={fy} closes={book.cashCloses} anchor={anchor} />
+      ) : kind === "accountant" ? (
+        <AccountantFile book={book} month={pickedMonth} months={months} year={accountYear} yearLabel={fyLabel(fy)} onMonth={setAccountMonth} onYear={setAccountYear} />
       ) : shown.length === 0 ? (
         <p className="rounded-xl border border-line bg-surface p-5 text-sm text-muted">Nothing entered for {fyLabel(fy)}.</p>
       ) : kind === "centre" ? (
@@ -187,8 +197,334 @@ function titleOf(kind: ReportKind): string {
   if (kind === "expenses") return "Expenses";
   if (kind === "leave") return "Leave";
   if (kind === "logins") return "Login log";
+  if (kind === "accountant") return "Month file";
   if (kind === "transfers") return "Transfers to self";
   return "Centre statement";
+}
+
+function accountantMonths(book: LedgerData, months: string[], today: string): string[] {
+  return months.filter((month) => {
+    if (today && month > today.slice(0, 7)) return false;
+    const row = accountantFigures(book, month, today);
+    if (row.snap.collection || row.expenses || row.bad || row.snap.selfExpense) return true;
+    if ((book.salaryPaid ?? []).some((item) => item.confirmed && item.month === month && ((item.basic || 0) > 0 || (item.incentive || 0) > 0))) return true;
+    if (today && month === today.slice(0, 7)) return true;
+    return book.leaves.some((mark) => mark.date.startsWith(month));
+  });
+}
+
+function badCreditLines(book: LedgerData, month: string) {
+  return (book.expenseLines ?? []).filter((line) => line.month === month && line.category === "bad");
+}
+
+function accountantFigures(book: LedgerData, month: string, today: string) {
+  const snap = centreSnapshot(
+    book.employees,
+    book.days,
+    book.perfOverrides,
+    book.leaves,
+    book.holidays,
+    book.expenses,
+    book.lyOverrides,
+    month,
+    book.deductLwp,
+    today,
+    book.payouts ?? [],
+    book.salaryPaid ?? [],
+    book.expenseLines ?? [],
+  );
+  const people = staffMonthRows(
+    book.employees,
+    book.days,
+    book.perfOverrides,
+    book.leaves,
+    book.holidays,
+    month,
+    snap.collection,
+    book.deductLwp,
+    today,
+    book.salaryPaid ?? [],
+  );
+  const badLines = badCreditLines(book, month);
+  const bad = badLines.reduce((sum, line) => sum + (line.amount || 0), 0);
+  const expenses = Math.max(0, snap.expense - bad);
+  return { snap, people, badLines, bad, expenses };
+}
+
+function accountantSheets(book: LedgerData, month: string, today: string): Sheet[] {
+  const { snap, people, badLines, bad, expenses } = accountantFigures(book, month, today);
+  const bills = (book.expenseLines ?? []).filter((line) => line.month === month && line.category !== "bad" && line.category !== "self");
+  const paidOut = (book.payouts ?? []).filter((item) => item.date.startsWith(month) && item.category !== "personal");
+  const earlier = Object.entries(book.expenses[month] ?? {}).filter(([, amount]) => amount > 0);
+  const categoryName = (id: string) => book.categories.find((item) => item.id === id)?.name ?? id;
+  return [
+    {
+      name: "Summary",
+      rows: [
+        ["Particular", "Amount"],
+        ["Collection", snap.collection],
+        ["Expenses", expenses],
+        ["Bad credit", bad],
+        ["Salary paid", snap.salary],
+        ["Margin", snap.margin],
+        ["Self expenses, kept in margin", snap.selfExpense],
+      ],
+    },
+    {
+      name: "Expenses",
+      rows: [
+        ["Description", "Category", "Amount"],
+        ...bills.map((line) => [line.name, expenseKindLabel(line.category), line.amount]),
+        ...paidOut.map((item) => [item.note || payoutLabel(item.category), payoutLabel(item.category), item.amount]),
+        ...earlier.map(([id, amount]) => [categoryName(id), "Expense", amount]),
+        ["Total", "", expenses],
+      ],
+    },
+    {
+      name: "Bad credit",
+      rows: [
+        ["Customer", "Amount"],
+        ...badLines.map((line) => [line.name.replace(/^Bad credit · /, ""), line.amount]),
+        ["Total", bad],
+      ],
+    },
+    {
+      name: "Salary",
+      rows: [
+        ["Staff", "Basic", "Incentive", "Total", "Source"],
+        ...people.map((row) => {
+          const saved = (book.salaryPaid ?? []).some((item) => item.confirmed && item.employeeId === row.employee.id && item.month === month);
+          return [row.employee.name, row.pay.basicPayable, row.pay.incentive, row.pay.gross, saved ? "Final salary saved" : "Calculated"];
+        }),
+        ["Total", "", "", snap.salary, ""],
+      ],
+    },
+  ];
+}
+
+function accountantYearSheets(book: LedgerData, months: string[], today: string, yearLabel: string): Sheet[] {
+  const rows = accountantMonths(book, months, today).map((month) => ({ month, ...accountantFigures(book, month, today) }));
+  const total = rows.reduce(
+    (sum, row) => ({
+      collection: sum.collection + row.snap.collection,
+      expenses: sum.expenses + row.expenses,
+      bad: sum.bad + row.bad,
+      salary: sum.salary + row.snap.salary,
+      margin: sum.margin + row.snap.margin,
+      self: sum.self + row.snap.selfExpense,
+    }),
+    { collection: 0, expenses: 0, bad: 0, salary: 0, margin: 0, self: 0 },
+  );
+  const line = (month: string, row: ReturnType<typeof accountantFigures>) =>
+    [formatMonthShort(month), row.snap.collection, row.expenses, row.bad, row.snap.salary, row.snap.margin, row.snap.selfExpense] as (string | number)[];
+  return [
+    {
+      name: "Year",
+      rows: [
+        ["Month", "Collection", "Expenses", "Bad credit", "Salary paid", "Margin", "Self expenses"],
+        ...rows.map((row) => line(row.month, row)),
+        ["Total", total.collection, total.expenses, total.bad, total.salary, total.margin, total.self],
+      ],
+    },
+    {
+      name: "Expenses",
+      rows: [
+        ["Month", "Description", "Category", "Amount"],
+        ...rows.flatMap((row) => expenseRows(book, row.month).map((item) => [formatMonthShort(row.month), ...item])),
+        ["Total", "", "", total.expenses],
+      ],
+    },
+    {
+      name: "Bad credit",
+      rows: [
+        ["Month", "Customer", "Amount"],
+        ...rows.flatMap((row) => row.badLines.map((item) => [formatMonthShort(row.month), item.name.replace(/^Bad credit · /, ""), item.amount])),
+        ["Total", "", total.bad],
+      ],
+    },
+    {
+      name: "Salary",
+      rows: [
+        ["Month", "Staff", "Basic", "Incentive", "Total", "Source"],
+        ...rows.flatMap((row) =>
+          row.people.map((person) => {
+            const saved = (book.salaryPaid ?? []).some((item) => item.confirmed && item.employeeId === person.employee.id && item.month === row.month);
+            return [formatMonthShort(row.month), person.employee.name, person.pay.basicPayable, person.pay.incentive, person.pay.gross, saved ? "Final salary saved" : "Calculated"];
+          }),
+        ),
+        ["Total", "", "", "", total.salary, ""],
+      ],
+    },
+  ];
+}
+
+function expenseRows(book: LedgerData, month: string): (string | number)[][] {
+  const bills = (book.expenseLines ?? []).filter((line) => line.month === month && line.category !== "bad" && line.category !== "self");
+  const paidOut = (book.payouts ?? []).filter((item) => item.date.startsWith(month) && item.category !== "personal");
+  const earlier = Object.entries(book.expenses[month] ?? {}).filter(([, amount]) => amount > 0);
+  const categoryName = (id: string) => book.categories.find((item) => item.id === id)?.name ?? id;
+  return [
+    ...bills.map((line) => [line.name, expenseKindLabel(line.category), line.amount]),
+    ...paidOut.map((item) => [item.note || payoutLabel(item.category), payoutLabel(item.category), item.amount]),
+    ...earlier.map(([id, amount]) => [categoryName(id), "Expense", amount]),
+  ];
+}
+
+function AccountantFile({
+  book,
+  month,
+  months,
+  year,
+  yearLabel,
+  onMonth,
+  onYear,
+}: {
+  book: LedgerData;
+  month: string;
+  months: string[];
+  year: boolean;
+  yearLabel: string;
+  onMonth: (month: string) => void;
+  onYear: (year: boolean) => void;
+}) {
+  const today = useTodayKey() || "";
+  const { snap, people, badLines, bad, expenses } = accountantFigures(book, month, today);
+  const yearRows = accountantMonths(book, months, today).map((item) => ({ month: item, ...accountantFigures(book, item, today) }));
+  const yearTotal = yearRows.reduce(
+    (sum, row) => ({
+      collection: sum.collection + row.snap.collection,
+      expenses: sum.expenses + row.expenses,
+      bad: sum.bad + row.bad,
+      salary: sum.salary + row.snap.salary,
+      margin: sum.margin + row.snap.margin,
+    }),
+    { collection: 0, expenses: 0, bad: 0, salary: 0, margin: 0 },
+  );
+  return (
+    <section className="rounded-xl border border-line bg-surface p-5">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h2 className="font-display text-2xl">{year ? "Financial year" : "Month file"}</h2>
+          <p className="mt-1 text-sm text-muted">Same figures as the centre. Nothing here is calculated a second way.</p>
+        </div>
+        <div className="flex flex-wrap items-end gap-2">
+          <div className="flex rounded-sm border border-line">
+            <button type="button" className={cn("h-11 px-4 text-sm", !year ? "bg-accent font-medium text-accent-ink" : "bg-bg")} onClick={() => onYear(false)}>
+              Month
+            </button>
+            <button type="button" className={cn("h-11 px-4 text-sm", year ? "bg-accent font-medium text-accent-ink" : "bg-bg")} onClick={() => onYear(true)}>
+              Financial year
+            </button>
+          </div>
+          {year ? (
+            <p className="grid h-11 place-items-center px-2 text-sm font-medium">{yearLabel}</p>
+          ) : (
+            <label className="text-sm">
+              <span className="sr-only">Month</span>
+              <select
+                aria-label="Accountant month"
+                className="h-11 rounded-sm border border-line bg-bg px-3 text-base outline-none focus:border-accent"
+                value={month}
+                onChange={(event) => onMonth(event.target.value)}
+              >
+                {months.map((item) => (
+                  <option key={item} value={item}>
+                    {formatMonthShort(item)}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+        </div>
+      </div>
+      {year ? (
+        <div className="mt-4 overflow-x-auto">
+          <table className="w-full min-w-[40rem] text-left text-sm">
+            <thead>
+              <tr className="border-b border-line text-xs tracking-widest text-faint">
+                <th className="py-2 pr-3 font-semibold">MONTH</th>
+                <th className="py-2 pr-3 font-semibold">COLLECTION</th>
+                <th className="py-2 pr-3 font-semibold">EXPENSES</th>
+                <th className="py-2 pr-3 font-semibold">BAD CREDIT</th>
+                <th className="py-2 pr-3 font-semibold">SALARY</th>
+                <th className="py-2 font-semibold">MARGIN</th>
+              </tr>
+            </thead>
+            <tbody>
+              {yearRows.map((row) => (
+                <tr key={row.month} className="border-b border-line">
+                  <td className="py-2 pr-3">{formatMonthShort(row.month)}</td>
+                  <td className="py-2 pr-3 tabular-nums">{inr(row.snap.collection)}</td>
+                  <td className="py-2 pr-3 tabular-nums">{inr(row.expenses)}</td>
+                  <td className="py-2 pr-3 tabular-nums">{inr(row.bad)}</td>
+                  <td className="py-2 pr-3 tabular-nums">{inr(row.snap.salary)}</td>
+                  <td className="py-2 tabular-nums">{inr(row.snap.margin)}</td>
+                </tr>
+              ))}
+              <tr>
+                <td className="py-2 pr-3 font-medium">Total</td>
+                <td className="py-2 pr-3 font-medium tabular-nums">{inr(yearTotal.collection)}</td>
+                <td className="py-2 pr-3 font-medium tabular-nums">{inr(yearTotal.expenses)}</td>
+                <td className="py-2 pr-3 font-medium tabular-nums">{inr(yearTotal.bad)}</td>
+                <td className="py-2 pr-3 font-medium tabular-nums">{inr(yearTotal.salary)}</td>
+                <td className="py-2 font-medium tabular-nums">{inr(yearTotal.margin)}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <>
+          <div className="mt-4 grid gap-3 sm:grid-cols-3">
+            <FileTile label="Collection" value={snap.collection} />
+            <FileTile label="Expenses" value={expenses} />
+            <FileTile label="Bad credit" value={bad} />
+            <FileTile label="Salary paid" value={snap.salary} />
+            <FileTile label="Margin" value={snap.margin} />
+            <FileTile label="Self expenses" value={snap.selfExpense} note="Kept in the margin" />
+          </div>
+          <h3 className="mt-6 font-display text-xl">Salary</h3>
+          <ul className="mt-2 divide-y divide-line">
+            {people.map((row) => {
+              const saved = (book.salaryPaid ?? []).some((item) => item.confirmed && item.employeeId === row.employee.id && item.month === month);
+              return (
+                <li key={row.employee.id} className="flex items-center justify-between gap-3 py-2 text-sm">
+                  <span>
+                    {row.employee.name}
+                    <span className="mt-0.5 block text-xs text-faint">{saved ? "Final salary saved" : "Calculated, not yet saved"}</span>
+                  </span>
+                  <span className="tabular-nums">{inr(row.pay.gross)}</span>
+                </li>
+              );
+            })}
+          </ul>
+          {badLines.length > 0 ? (
+            <>
+              <h3 className="mt-6 font-display text-xl">Bad credit</h3>
+              <ul className="mt-2 divide-y divide-line">
+                {badLines.map((line) => (
+                  <li key={line.id} className="flex items-center justify-between gap-3 py-2 text-sm">
+                    <span>{line.name.replace(/^Bad credit · /, "")}</span>
+                    <span className="tabular-nums">{inr(line.amount)}</span>
+                  </li>
+                ))}
+              </ul>
+            </>
+          ) : null}
+        </>
+      )}
+      <p className="mt-4 text-sm text-muted">Use Excel above to download {year ? "this financial year" : "this month"}. The year arrows change the financial year. Margin is collection minus expenses, bad credit, and salary.</p>
+    </section>
+  );
+}
+
+function FileTile({ label, value, note }: { label: string; value: number; note?: string }) {
+  return (
+    <div className="rounded-xl border border-line bg-bg p-4">
+      <p className="text-xs font-semibold tracking-widest text-faint">{label.toUpperCase()}</p>
+      <p className="mt-1 font-display text-3xl tabular-nums">{inr(value)}</p>
+      {note ? <p className="mt-1 text-sm text-muted">{note}</p> : null}
+    </div>
+  );
 }
 
 async function buildReportWorkbook(
@@ -198,8 +534,16 @@ async function buildReportWorkbook(
   shown: CentreSnapshot[],
   people: { month: string; rows: StaffMonthRow[] }[],
   book: LedgerData,
+  accountMonth = "",
+  asOf = "",
+  accountYear = false,
+  accountMonths: string[] = [],
 ): Promise<{ name: string; sheets: Sheet[] }> {
   const safeYear = yearLabel.replace(/\s+/g, "");
+  if (kind === "accountant") {
+    if (accountYear) return { name: `Akshaya-${safeYear}-accounts.xlsx`, sheets: accountantYearSheets(book, accountMonths, asOf, yearLabel) };
+    return { name: `Akshaya-${accountMonth}-accounts.xlsx`, sheets: accountantSheets(book, accountMonth, asOf) };
+  }
   if (kind === "transfers") {
     const match = yearLabel.match(/(\d{4})/);
     const start = match ? Number(match[1]) : NaN;
