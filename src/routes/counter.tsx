@@ -40,31 +40,37 @@ function CounterPage() {
   const [panel, setPanel] = useState<"live" | "credit" | "advance">("live");
   const [showCustomers, setShowCustomers] = useState(false);
   const serviceRef = useRef<HTMLInputElement>(null);
+  const seen = useRef(0);
   const day = date || today || "";
 
   useEffect(() => {
     if (today) setDate((current) => current || today);
   }, [today]);
 
-  const reload = () =>
-    serviceDay({ data: day || today }).then((next) => {
-      setRole(next.role);
-      setTotal(next.total);
-      setLines(next.lines);
-      setClosed(Boolean(next.closed));
+  const showDay = (seq: number, next: { role: "admin" | "employee" | "closer"; total: number; lines: ServiceLine[]; closed?: boolean }) => {
+    if (seq !== seen.current) return;
+    setRole(next.role);
+    setTotal(next.total);
+    setLines(next.lines);
+    setClosed(Boolean(next.closed));
+  };
+
+  const reload = () => {
+    const seq = ++seen.current;
+    return serviceDay({ data: day || today }).then((next) => {
+      showDay(seq, next);
       return pullSharedCloses();
     });
+  };
 
   useRefresh(() => {
     if (!day) return;
+    const seq = ++seen.current;
     return serviceDay({ data: day })
-      .then((next) => {
-        setRole(next.role);
-        setTotal(next.total);
-        setLines(next.lines);
-        setClosed(Boolean(next.closed));
-      })
-      .catch((error: unknown) => setNotice(error instanceof Error ? error.message : "The counter did not open."));
+      .then((next) => showDay(seq, next))
+      .catch((error: unknown) => {
+        if (seq === seen.current) setNotice(error instanceof Error ? error.message : "The counter did not open.");
+      });
   }, 15000, [day]);
 
   const save = () => {

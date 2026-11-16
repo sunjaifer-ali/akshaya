@@ -485,12 +485,15 @@ export const removeCustomerMove = createServerFn({ method: "POST" })
     await withTransaction(async (sql) => {
       await ensureCustomerTable(sql);
       await ensureServiceTable(sql);
-      const rows = await sql<{ taken_on: string }>`select taken_on::text as taken_on from customer_move where id = ${id}`;
+      const rows = await sql<{ taken_on: string; customer: string; kind: string; amount: number }>`
+        select taken_on::text as taken_on, customer, kind, amount from customer_move where id = ${id}
+      `;
       const linked = await sql<{ taken_on: string }>`select taken_on::text as taken_on from service_entry where credit_move_id = ${id}`;
       await sql`delete from service_entry where credit_move_id = ${id}`;
       await sql`delete from customer_move where id = ${id}`;
-      creditHealAt = 0;
-      const date = rows[0]?.taken_on?.slice(0, 10);
+      const gone = rows[0];
+      const date = gone?.taken_on?.slice(0, 10);
+      if (date && gone) await stripClosedCredit(sql, date, gone.kind, gone.customer, Number(gone.amount) || 0);
       if (date) await rollCreditDay(sql, date);
       const dates = new Set<string>();
       if (date) dates.add(date);
@@ -503,6 +506,48 @@ export const removeCustomerMove = createServerFn({ method: "POST" })
     });
     return { ok: true };
   });
+
+async function stripClosedCredit(
+  sql: Awaited<ReturnType<typeof import("@/lib/db").getSql>>,
+  date: string,
+  kind: string,
+  customer: string,
+  amount: number,
+) {
+  const current = await sql<{ data: LedgerData | string; touches: Record<string, string> | string }>`
+    select data, touches from centre_book where id = 'centre' for update
+  `;
+  const row = readRow(current[0]);
+  if (!row) return;
+  const name = customer.trim().toLowerCase();
+  let dropped = false;
+  const cashCloses = (row.data.cashCloses ?? []).map((close) => {
+    if (close.date !== date || dropped) return close;
+    if (kind === "credit") {
+      const creditGiven = (close.creditGiven ?? []).filter((item) => {
+        if (dropped) return true;
+        const same = (item.customer ?? "").trim().toLowerCase() === name && (item.amount || 0) === amount;
+        if (!same) return true;
+        dropped = true;
+        return false;
+      });
+      return { ...close, creditGiven };
+    }
+    if (kind === "debit") {
+      const creditPaid = (close.creditPaid ?? []).filter((item) => {
+        if (dropped) return true;
+        const same = (item.name ?? "").trim().toLowerCase() === name && (item.amount || 0) === amount;
+        if (!same) return true;
+        dropped = true;
+        return false;
+      });
+      return { ...close, creditPaid };
+    }
+    return close;
+  });
+  if (!dropped) return;
+  await writeBook(sql, { ...row.data, cashCloses }, row.touches);
+}
 
 function dayText(value: unknown): string {
   if (value instanceof Date) {
@@ -625,7 +670,7 @@ function foldCredits(
           date,
         });
       }
-    } else if (!close?.creditSeparate && !(trustMovesFrom && date >= trustMovesFrom)) {
+    } else {
       for (const item of close?.creditGiven ?? []) {
         addOpenCredit(lines, {
           customer: item.customer ?? "",
@@ -639,9 +684,7 @@ function foldCredits(
     const payments =
       debits.length > 0
         ? debits.map((move) => ({ name: move.customer, mobile: move.mobile, amount: Number(move.amount) || 0 }))
-        : close?.creditSeparate || (trustMovesFrom && date >= trustMovesFrom)
-          ? []
-          : (close?.creditPaid ?? []).map((item) => ({ name: item.name ?? "", amount: item.amount || 0 }));
+        : (close?.creditPaid ?? []).map((item) => ({ name: item.name ?? "", amount: item.amount || 0 }));
     for (const item of payments) payOpenCredit(lines, item.name, item.amount, date, "mobile" in item ? String(item.mobile ?? "") : "");
     for (const move of dayMoves.filter((item) => item.kind === "writeoff")) {
       payOpenCredit(lines, move.customer, Number(move.amount) || 0, date, move.mobile);
@@ -660,45 +703,70 @@ function earliestMove(dates: string[]): string {
   return first;
 }
 
-let creditHealAt = 0;
-
 async function healStaleCredits(sql: Awaited<ReturnType<typeof import("@/lib/db").getSql>>) {
-  if (Date.now() - creditHealAt < 10 * 60 * 1000) return;
-  creditHealAt = Date.now();
   const preview = await sql<{ data: LedgerData | string }>`select data from centre_book where id = 'centre'`;
   const seen = preview[0] ? asJson(preview[0].data) : null;
-  if (!seen || !(await staleCreditCopy(sql, seen))) return;
+  if (!seen) return;
+  const moves = await creditMoves(sql);
+  if (!creditCopyMissing(seen, moves)) return;
   const current = await sql<{ data: LedgerData | string; touches: Record<string, string> | string }>`
     select data, touches from centre_book where id = 'centre' for update
   `;
   const row = readRow(current[0]);
   if (!row) return;
-  const cleaned = await staleCreditCopy(sql, row.data);
-  if (!cleaned) return;
-  await writeBook(sql, cleaned, row.touches);
+  const restored = restoreCreditCopies(row.data, await creditMoves(sql));
+  if (!restored) return;
+  await writeBook(sql, restored, row.touches);
 }
 
-async function staleCreditCopy(
-  sql: Awaited<ReturnType<typeof import("@/lib/db").getSql>>,
-  book: LedgerData,
-): Promise<LedgerData | null> {
-  const closes = book.cashCloses ?? [];
-  if (closes.length === 0) return null;
-  const moves = await sql<{ taken_on: string; kind: string }>`select taken_on::text as taken_on, kind from customer_move`;
-  const first = earliestMove(moves.map((move) => move.taken_on));
-  const creditDates = new Set(moves.filter((move) => move.kind === "credit").map((move) => dayText(move.taken_on)));
-  const debitDates = new Set(moves.filter((move) => move.kind === "debit").map((move) => dayText(move.taken_on)));
+type CreditMove = { taken_on: string; customer: string; staff_name: string; kind: string; amount: number };
+
+async function creditMoves(sql: Awaited<ReturnType<typeof import("@/lib/db").getSql>>): Promise<CreditMove[]> {
+  await ensureCustomerTable(sql);
+  const rows = await sql<CreditMove>`
+    select to_char(taken_on, 'YYYY-MM-DD') as taken_on, customer, staff_name, kind, amount
+    from customer_move
+    where kind in ('credit', 'debit')
+  `;
+  return rows.map((row) => ({ ...row, taken_on: String(row.taken_on).slice(0, 10), amount: Number(row.amount) || 0 }));
+}
+
+function creditCopyMissing(book: LedgerData, moves: CreditMove[]): boolean {
+  const dates = new Set(moves.map((move) => move.taken_on));
+  return (book.cashCloses ?? []).some((close) => {
+    if (!dates.has(close.date)) return false;
+    const day = moves.filter((move) => move.taken_on === close.date);
+    const gave = day.some((move) => move.kind === "credit");
+    const paid = day.some((move) => move.kind === "debit");
+    return (gave && (close.creditGiven ?? []).length === 0) || (paid && (close.creditPaid ?? []).length === 0);
+  });
+}
+
+function restoreCreditCopies(book: LedgerData, moves: CreditMove[]): LedgerData | null {
+  const employees = book.employees ?? [];
   let changed = false;
-  const cashCloses = closes.map((close) => {
-    const tracked = Boolean(close.creditSeparate) || Boolean(first && close.date >= first);
-    if (!tracked) return close;
+  const cashCloses = (book.cashCloses ?? []).map((close) => {
+    const day = moves.filter((move) => move.taken_on === close.date);
+    if (day.length === 0) return close;
     let next = close;
-    if (!creditDates.has(close.date) && (close.creditGiven?.length ?? 0) > 0) {
-      next = { ...next, creditGiven: [] };
+    const credits = day.filter((move) => move.kind === "credit");
+    const debits = day.filter((move) => move.kind === "debit");
+    if (credits.length > 0 && (close.creditGiven ?? []).length === 0) {
+      next = {
+        ...next,
+        creditGiven: credits.map((move) => ({
+          employeeId: employees.find((person) => person.name.trim().toLowerCase() === move.staff_name.trim().toLowerCase())?.id ?? "",
+          customer: move.customer,
+          amount: move.amount,
+        })),
+      };
       changed = true;
     }
-    if (!debitDates.has(close.date) && (close.creditPaid?.length ?? 0) > 0) {
-      next = { ...next, creditPaid: [] };
+    if (debits.length > 0 && (close.creditPaid ?? []).length === 0) {
+      next = {
+        ...next,
+        creditPaid: debits.map((move) => ({ name: move.customer, amount: move.amount })),
+      };
       changed = true;
     }
     return next;
@@ -836,8 +904,7 @@ async function positionAsOf(sql: Awaited<ReturnType<typeof import("@/lib/db").ge
   const lines = foldCredits(book?.cashCloses ?? [], moves, names, asOf, earliestMove(moves.map((move) => move.taken_on)));
   const todayMoves = moves.filter((move) => dayText(move.taken_on) === asOf);
   const todayClose = (book?.cashCloses ?? []).find((item) => item.date === asOf);
-  const tracked = Boolean(todayClose?.creditSeparate) || Boolean(earliestMove(moves.map((move) => move.taken_on)) && asOf >= earliestMove(moves.map((move) => move.taken_on)));
-  const given = todayMoves.some((move) => move.kind === "credit") || tracked
+  const given = todayMoves.some((move) => move.kind === "credit")
     ? todayMoves
         .filter((move) => move.kind === "credit")
         .map((move) => ({
@@ -846,7 +913,7 @@ async function positionAsOf(sql: Awaited<ReturnType<typeof import("@/lib/db").ge
           amount: Number(move.amount) || 0,
         }))
     : (todayClose?.creditGiven ?? []);
-  const paid = todayMoves.some((move) => move.kind === "debit") || tracked
+  const paid = todayMoves.some((move) => move.kind === "debit")
     ? todayMoves.filter((move) => move.kind === "debit").map((move) => ({ name: move.customer, amount: Number(move.amount) || 0 }))
     : (todayClose?.creditPaid ?? []);
   const unpaid = lines.reduce((sum, line) => sum + (line.balance > 0 ? line.balance : 0), 0);
@@ -1244,23 +1311,9 @@ async function stampAdvanceHeld(sql: Awaited<ReturnType<typeof import("@/lib/db"
   const advances = await sql<{ taken_on: string; used_on: string | null; amount: number }>`
     select taken_on::text as taken_on, used_on::text as used_on, amount from customer_advance
   `;
-  const have = new Set((data.cashCloses ?? []).map((close) => close.date));
-  const first = [...have].sort()[0] ?? "";
-  const today = indiaToday();
-  const shells: CashClose[] = [];
-  for (const item of advances) {
-    const taken = String(item.taken_on).slice(0, 10);
-    const used = item.used_on ? String(item.used_on).slice(0, 10) : "";
-    for (const date of [taken, used]) {
-      if (!date || have.has(date)) continue;
-      if (first ? date < first : date !== today) continue;
-      have.add(date);
-      shells.push(shellClose(date));
-    }
-  }
-  const ordered = [...(data.cashCloses ?? []), ...shells].sort((a, b) => (a.date < b.date ? -1 : 1));
+  const ordered = [...(data.cashCloses ?? [])].sort((a, b) => (a.date < b.date ? -1 : 1));
   let previous = "";
-  let changed = shells.length > 0;
+  let changed = false;
   const cashCloses = ordered.map((close) => {
     const held = heldOn(advances, close.date);
     const served = servedSince(advances, previous, close.date);

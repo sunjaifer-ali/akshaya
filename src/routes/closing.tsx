@@ -364,7 +364,6 @@ function ClosingPage() {
           )}
         </section>
       ) : null}
-
       <section className="mx-auto max-w-lg rounded-xl border border-line bg-surface p-4">
         <h2 className="text-center font-medium">Notes</h2>
         <div className="mt-3 grid grid-flow-col grid-rows-3 gap-x-4 gap-y-2">
@@ -410,6 +409,7 @@ function ClosingPage() {
         </Field>
         </div>
       </section>
+
 
       <PaidOut
         date={date}
