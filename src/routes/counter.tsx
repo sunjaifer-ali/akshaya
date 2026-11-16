@@ -104,6 +104,54 @@ function CounterPage() {
       .finally(() => setPending(false));
   };
 
+  const saveCredit = () => {
+    if (personalGpay) {
+      setResult({ ok: false, message: "This was paid to the personal number. Use Add charge." });
+      return;
+    }
+    const digits = mobile.replace(/\D/g, "");
+    if (digits.length !== 10) {
+      setResult({ ok: false, message: "Enter the customer's 10 digit mobile number." });
+      return;
+    }
+    const serviceCharge = Math.round(Number(amount) || 0);
+    const departmentPay = Math.round(Number(department) || 0);
+    if (serviceCharge + departmentPay <= 0) {
+      setResult({ ok: false, message: "Enter the service charge. Add the department payment if the wallet will drop." });
+      return;
+    }
+    setPending(true);
+    setNotice("");
+    void addCustomerMove({
+      data: {
+        kind: "credit",
+        customer,
+        mobile: digits,
+        service,
+        amount: serviceCharge + departmentPay,
+        serviceCharge,
+        department: departmentPay,
+      },
+    })
+      .then(() => {
+        setService("");
+        setCustomer("");
+        setMobile("");
+        setAmount("");
+        setPersonalGpay(false);
+        setDepartment("");
+        setPayMode("cash");
+        setCashPart("");
+        setResult({ ok: true, message: "Credit saved. The service charge is in today's collection. Do not enter it again." });
+        serviceRef.current?.focus();
+        return reload();
+      })
+      .catch((error: unknown) => {
+        setResult({ ok: false, message: error instanceof Error ? error.message : "Credit was not saved." });
+      })
+      .finally(() => setPending(false));
+  };
+
   const byStaff = new Map<string, number>();
   for (const line of lines) byStaff.set(line.staff, (byStaff.get(line.staff) ?? 0) + line.amount);
   const names = new Set(book.employees.map((employee) => employee.name.trim().toLowerCase()));
@@ -221,7 +269,7 @@ function CounterPage() {
           />
           <input
             aria-label="Mobile"
-            placeholder="Mobile"
+            placeholder="Mobile, 10 digits"
             inputMode="numeric"
             className="h-12 w-full rounded-sm border border-line bg-bg px-3 text-base outline-none focus:border-accent"
             value={mobile}
@@ -287,11 +335,26 @@ function CounterPage() {
               <span className="mt-1 block text-sm tabular-nums">On the phone {inr(Number(amount || 0) + Number(department || 0))}</span>
             </label>
           ) : null}
-          <div className="sm:col-span-2">
+          <div className="grid gap-2 sm:col-span-2 sm:grid-cols-2">
             <Button type="submit" className="min-h-12 w-full" disabled={pending}>
               {pending ? "Saving…" : "Add charge"}
             </Button>
+            <Button type="button" variant="secondary" className="min-h-12 w-full" disabled={pending || personalGpay} onClick={saveCredit}>
+              Not paid — credit
+            </Button>
           </div>
+          {!personalGpay ? (
+            <label className="block text-sm sm:col-span-2">
+              <input
+                inputMode="numeric"
+                aria-label="Department payment for credit"
+                placeholder="Department payment, only if this is a credit"
+                className="h-12 w-full rounded-sm border border-line bg-bg px-3 text-base outline-none focus:border-accent"
+                value={department}
+                onChange={(event) => setDepartment(event.target.value.replace(/[^\d]/g, "").slice(0, 7))}
+              />
+            </label>
+          ) : null}
         </form>
       ) : panel === "live" && role === "admin" ? (
         <p className="mt-4 text-sm text-muted">Open today to enter a charge. This date is only for viewing.</p>
@@ -611,9 +674,9 @@ function CounterCredit({ month, onResult }: { month: string; onResult: (result: 
                   {line.customer}
                   <span className="mt-0.5 block text-xs text-faint">{line.mobile || "No mobile"} · {inr(line.balance)}</span>
                 </span>
-                <Button size="sm" variant="secondary" onClick={() => setPayFor(payFor === line.customer ? "" : line.customer)}>Receive</Button>
+                <Button size="sm" variant="secondary" onClick={() => setPayFor(payFor === `${line.customer}|${line.mobile}` ? "" : `${line.customer}|${line.mobile}`)}>Receive</Button>
               </div>
-              {payFor === line.customer ? (
+              {payFor === `${line.customer}|${line.mobile}` ? (
                 <form
                   className="mt-2 flex gap-2"
                   onSubmit={(event) => {
@@ -668,7 +731,7 @@ function CounterCredit({ month, onResult }: { month: string; onResult: (result: 
             }}
           >
             <input aria-label="Credit customer" className="h-11 rounded-sm border border-line bg-bg px-3" placeholder="Customer" value={customer} onChange={(event) => setCustomer(event.target.value)} />
-            <input aria-label="Credit mobile" inputMode="numeric" className="h-11 rounded-sm border border-line bg-bg px-3" placeholder="Mobile" value={mobile} onChange={(event) => setMobile(event.target.value)} />
+            <input aria-label="Credit mobile" inputMode="numeric" className="h-11 rounded-sm border border-line bg-bg px-3" placeholder="Mobile, 10 digits" value={mobile} onChange={(event) => setMobile(event.target.value)} />
             <input aria-label="Credit service charge" inputMode="numeric" className="h-11 rounded-sm border border-line bg-bg px-3" placeholder="Service charge" value={serviceCharge} onChange={(event) => setServiceCharge(event.target.value.replace(/[^\d]/g, "").slice(0, 7))} />
             <input aria-label="Credit department payment" inputMode="numeric" className="h-11 rounded-sm border border-line bg-bg px-3" placeholder="Department payment" value={department} onChange={(event) => setDepartment(event.target.value.replace(/[^\d]/g, "").slice(0, 7))} />
             <p className="text-sm text-muted">Credit {inr(Number(serviceCharge || 0) + Number(department || 0))}. Do not enter this service charge again on the counter.</p>

@@ -320,7 +320,7 @@ export type OpenCredit = { customer: string; mobile: string; staff: string; bala
 
 export const addCustomerMove = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
-  .validator((input: { kind: string; customer: string; mobile: string; amount: number; serviceCharge?: number; department?: number }) => {
+  .validator((input: { kind: string; customer: string; mobile: string; amount: number; serviceCharge?: number; department?: number; service?: string }) => {
     const kind = input.kind === "debit" ? "debit" : input.kind === "credit" ? "credit" : "";
     const customer = input.customer.trim().slice(0, 80);
     const mobile = optionalMobile(input.mobile);
@@ -328,10 +328,12 @@ export const addCustomerMove = createServerFn({ method: "POST" })
     const departmentPay = Math.max(0, Math.round(Number(input.department) || 0));
     const split = kind === "credit" && (serviceCharge > 0 || departmentPay > 0);
     const amount = split ? serviceCharge + departmentPay : Math.round(Number(input.amount));
+    const service = String(input.service ?? "").trim().slice(0, 60);
     if (!kind) throw new Error("Choose credit or debit.");
     if (!customer) throw new Error("Enter the customer name.");
+    if (kind === "credit" && mobile.length !== 10) throw new Error("Enter the customer's 10 digit mobile number.");
     if (!Number.isFinite(amount) || amount <= 0 || amount > 100000) throw new Error("Enter the amount.");
-    return { kind, customer, mobile, amount, serviceCharge: split ? serviceCharge : 0, department: split ? departmentPay : 0 };
+    return { kind, customer, mobile, amount, service: service || "Credit", serviceCharge: split ? serviceCharge : 0, department: split ? departmentPay : 0 };
   })
   .handler(async ({ context, data }) => {
     const role = await requireMember(context.userId);
@@ -341,7 +343,7 @@ export const addCustomerMove = createServerFn({ method: "POST" })
       await ensureCustomerTable(sql);
       if (data.kind === "debit") {
         const open = await openCredits(sql);
-        const due = open.find((line) => line.customer.toLowerCase() === data.customer.toLowerCase());
+        const due = findOpenCredit(open, data.customer, data.mobile);
         if (!due || due.balance < data.amount) throw new Error("That customer does not owe this much.");
       }
       const member = await sql<{ name: string }>`select name from centre_member where user_id = ${context.userId}`;
@@ -352,7 +354,7 @@ export const addCustomerMove = createServerFn({ method: "POST" })
       if (data.kind === "credit" && data.serviceCharge > 0) {
         await ensureServiceTable(sql);
         await sql`insert into service_entry (id, taken_on, user_id, staff_name, service, customer, mobile, amount, personal_gpay, department, bank_department, pay_mode, cash_part, credit_move_id)
-          values (${crypto.randomUUID()}, ${date}, ${context.userId}, ${staff}, ${"Credit"}, ${data.customer}, ${data.mobile}, ${data.serviceCharge}, ${false}, ${0}, ${0}, ${"credit"}, ${null}, ${id})`;
+          values (${crypto.randomUUID()}, ${date}, ${context.userId}, ${staff}, ${data.service}, ${data.customer}, ${data.mobile}, ${data.serviceCharge}, ${false}, ${0}, ${0}, ${"credit"}, ${null}, ${id})`;
       }
       await rollCreditSave(sql, date, data.kind === "credit" && data.serviceCharge > 0);
       return { ok: true };
@@ -361,12 +363,13 @@ export const addCustomerMove = createServerFn({ method: "POST" })
 
 export const writeOffCredit = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
-  .validator((input: { customer: string; amount: number }) => {
+  .validator((input: { customer: string; amount: number; mobile?: string }) => {
     const customer = input.customer.trim().slice(0, 80);
     const amount = Math.round(Number(input.amount));
+    const mobile = optionalMobile(input.mobile ?? "");
     if (!customer) throw new Error("Enter the customer name.");
     if (!Number.isFinite(amount) || amount <= 0 || amount > 100000) throw new Error("Enter the amount to write off.");
-    return { customer, amount };
+    return { customer, amount, mobile };
   })
   .handler(async ({ context, data }) => {
     await requireAdmin(context.userId);
@@ -374,7 +377,7 @@ export const writeOffCredit = createServerFn({ method: "POST" })
     await withTransaction(async (sql) => {
       await ensureCustomerTable(sql);
       const open = await openCredits(sql);
-      const due = open.find((line) => creditKey(line.customer) === creditKey(data.customer));
+      const due = findOpenCredit(open, data.customer, data.mobile);
       if (!due || due.balance < data.amount) throw new Error("That customer does not owe this much.");
       const limit = addDays(date, -30);
       if (!due.date || due.date > limit) throw new Error("A credit can be written off only after 30 days.");
@@ -535,6 +538,14 @@ async function ensureCustomerTable(sql: Awaited<ReturnType<typeof import("@/lib/
 }
 
 type OpenRow = { key: string; customer: string; mobile: string; staff: string; balance: number; date: string };
+
+function findOpenCredit(open: OpenCredit[], customer: string, mobile: string): OpenCredit | undefined {
+  const exact = open.find((line) => creditKey(line.customer, line.mobile) === creditKey(customer, mobile));
+  if (exact) return exact;
+  if (mobile) return undefined;
+  const named = open.filter((line) => creditKey(line.customer) === creditKey(customer));
+  return named.length === 1 ? named[0] : undefined;
+}
 
 function creditKey(name: string, mobile = ""): string {
   const base = name.trim().toLowerCase().replace(/\s+/g, " ");
