@@ -344,6 +344,7 @@ export const useLedger = create<LedgerState>()(
               .filter((item) => item.amount > 0),
             countedBy: (close.countedBy ?? "").trim().slice(0, 80),
             accepted: Boolean(close.accepted),
+            draft: Boolean(close.draft) && !close.accepted,
             advanceHeld: rupee(close.advanceHeld ?? 0),
             advanceServed: rupee(close.advanceServed ?? 0),
             ...(typeof close.advanceIn === "number" ? { advanceIn: rupee(close.advanceIn) } : {}),

@@ -231,8 +231,8 @@ function ClosingPage() {
 
       <p className="mb-4 text-sm text-muted">
         {formatFull(date)}
-        {saved && countStarted(saved) && !editing ? " · Saved" : ""}
-        {saved && countStarted(saved) ? ` · Closed by ${row.countedBy || "Admin"}` : ""}
+        {saved && countStarted(saved) && !editing ? (saved.draft ? " · Draft" : " · Saved") : ""}
+        {saved && countStarted(saved) && !saved.draft ? ` · Closed by ${row.countedBy || "Admin"}` : ""}
         {accepted ? " · Accepted" : ""}
       </p>
 
@@ -456,7 +456,7 @@ function ClosingPage() {
           <Button
             onClick={() => {
               const closer = user?.displayName?.trim() || "Admin";
-              const next = { ...row, date, countedBy: closer, accepted: role === "admin" ? Boolean(saved?.accepted) : false };
+              const next = { ...row, date, countedBy: closer, accepted: role === "admin" ? Boolean(saved?.accepted) : false, draft: false };
               book.setCashClose(next);
               setDraft(next);
               setEditing(countStarted(next) ? false : true);
@@ -479,7 +479,25 @@ function ClosingPage() {
             Edit
           </Button>
         )}
-        {role === "admin" && saved && !editing ? (
+        {role === "admin" && editing && !locked ? (
+          <Button
+            variant="secondary"
+            onClick={() => {
+              const closer = user?.displayName?.trim() || "Admin";
+              const next = { ...row, date, countedBy: closer, accepted: false, draft: true };
+              book.setCashClose(next);
+              setDraft(next);
+              setEditing(countStarted(next) ? false : true);
+              setResult({ ok: true, message: "Draft saved. Staff can still enter charges." });
+              void pushClose(date, next).catch((error: unknown) => {
+                setResult({ ok: false, message: error instanceof Error ? error.message : "Saved on this browser, but not shared." });
+              });
+            }}
+          >
+            Save draft
+          </Button>
+        ) : null}
+        {role === "admin" && saved && !saved.draft && !editing ? (
           <Button
             onClick={() => {
               const next = {
@@ -488,6 +506,7 @@ function ClosingPage() {
                 creditPaid: liveCredit?.paid ?? saved.creditPaid,
                 credits: liveCredit?.unpaid ?? saved.credits,
                 accepted: !accepted,
+                draft: false,
               };
               book.setCashClose(next);
               setResult({

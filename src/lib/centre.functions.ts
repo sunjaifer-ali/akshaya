@@ -2076,7 +2076,7 @@ async function dayIsClosed(sql: Awaited<ReturnType<typeof import("@/lib/db").get
   const book = current[0] ? asJson(current[0].data) : null;
   const close = (book?.cashCloses ?? []).find((item) => item.date === date);
   if (!close) return false;
-  return Boolean(close.accepted) || countStarted(close);
+  return Boolean(close.accepted) || (countStarted(close) && !close.draft);
 }
 
 async function dayIsAccepted(sql: Awaited<ReturnType<typeof import("@/lib/db").getSql>>, date: string) {
@@ -2429,6 +2429,7 @@ export const saveSharedClose = createServerFn({ method: "POST" })
           date: data.date,
           countedBy: (sent.countedBy ?? "").trim().slice(0, 80),
           accepted: role === "closer" ? false : Boolean(sent.accepted),
+          draft: role === "admin" && Boolean(sent.draft) && !sent.accepted,
           profitTaken: Number.isFinite(profitTaken) && profitTaken > 0 ? Math.min(profitTaken, 10000000) : 0,
           profitNote: (sent.profitNote ?? "").trim().slice(0, 80),
           transfers,

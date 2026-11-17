@@ -131,7 +131,7 @@ function closeBase(row: CashClose): number {
 export function previousClose(rows: CashClose[], date: string): CashClose | null {
   let best: CashClose | null = null;
   for (const row of rows) {
-    if (row.date < date && countStarted(row) && (!best || row.date > best.date)) best = row;
+    if (row.date < date && countStarted(row) && !row.draft && (!best || row.date > best.date)) best = row;
   }
   return best;
 }
@@ -319,6 +319,7 @@ export function accountLines(
   return [...closes]
     .sort((a, b) => (a.date < b.date ? -1 : 1))
     .flatMap((row) => {
+      if (row.draft) return [];
       const check = checkClose(row, closes, days, holidays, payouts);
       if (check.difference == null || check.unfixed == null || check.difference === 0) return [];
       return [{ date: row.date, difference: check.difference, unfixed: check.unfixed }];
