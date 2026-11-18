@@ -416,7 +416,6 @@ export const creditRegister = createServerFn({ method: "GET" })
     const { getSql } = await import("@/lib/db");
     const sql = await getSql();
     await ensureCustomerTable(sql);
-    await healStaleCredits(sql);
     const stored = await sql<{ taken_on: string; staff: string; customer: string; mobile: string; kind: string; amount: number }>`
       select taken_on::text as taken_on, staff_name as staff, customer, mobile, kind, amount
       from customer_move order by taken_on, created_at
@@ -763,84 +762,7 @@ function earliestMove(dates: string[]): string {
   return first;
 }
 
-let creditHealAt = 0;
-
-async function healStaleCredits(sql: Awaited<ReturnType<typeof import("@/lib/db").getSql>>) {
-  const now = Date.now();
-  if (now - creditHealAt < 10 * 60 * 1000) return;
-  creditHealAt = now;
-  const preview = await sql<{ data: LedgerData | string }>`select data from centre_book where id = 'centre'`;
-  const seen = preview[0] ? asJson(preview[0].data) : null;
-  if (!seen) return;
-  const moves = await creditMoves(sql);
-  if (!creditCopyMissing(seen, moves)) return;
-  const current = await sql<{ data: LedgerData | string; touches: Record<string, string> | string }>`
-    select data, touches from centre_book where id = 'centre' for update
-  `;
-  const row = readRow(current[0]);
-  if (!row) return;
-  const restored = restoreCreditCopies(row.data, await creditMoves(sql));
-  if (!restored) return;
-  await writeBook(sql, restored, row.touches);
-}
-
-type CreditMove = { taken_on: string; customer: string; staff_name: string; kind: string; amount: number };
-
-async function creditMoves(sql: Awaited<ReturnType<typeof import("@/lib/db").getSql>>): Promise<CreditMove[]> {
-  await ensureCustomerTable(sql);
-  const rows = await sql<CreditMove>`
-    select to_char(taken_on, 'YYYY-MM-DD') as taken_on, customer, staff_name, kind, amount
-    from customer_move
-    where kind in ('credit', 'debit')
-  `;
-  return rows.map((row) => ({ ...row, taken_on: String(row.taken_on).slice(0, 10), amount: Number(row.amount) || 0 }));
-}
-
-function creditCopyMissing(book: LedgerData, moves: CreditMove[]): boolean {
-  const dates = new Set(moves.map((move) => move.taken_on));
-  return (book.cashCloses ?? []).some((close) => {
-    if (!dates.has(close.date)) return false;
-    const day = moves.filter((move) => move.taken_on === close.date);
-    const gave = day.some((move) => move.kind === "credit");
-    const paid = day.some((move) => move.kind === "debit");
-    return (gave && (close.creditGiven ?? []).length === 0) || (paid && (close.creditPaid ?? []).length === 0);
-  });
-}
-
-function restoreCreditCopies(book: LedgerData, moves: CreditMove[]): LedgerData | null {
-  const employees = book.employees ?? [];
-  let changed = false;
-  const cashCloses = (book.cashCloses ?? []).map((close) => {
-    const day = moves.filter((move) => move.taken_on === close.date);
-    if (day.length === 0) return close;
-    let next = close;
-    const credits = day.filter((move) => move.kind === "credit");
-    const debits = day.filter((move) => move.kind === "debit");
-    if (credits.length > 0 && (close.creditGiven ?? []).length === 0) {
-      next = {
-        ...next,
-        creditGiven: credits.map((move) => ({
-          employeeId: employees.find((person) => person.name.trim().toLowerCase() === move.staff_name.trim().toLowerCase())?.id ?? "",
-          customer: move.customer,
-          amount: move.amount,
-        })),
-      };
-      changed = true;
-    }
-    if (debits.length > 0 && (close.creditPaid ?? []).length === 0) {
-      next = {
-        ...next,
-        creditPaid: debits.map((move) => ({ name: move.customer, amount: move.amount })),
-      };
-      changed = true;
-    }
-    return next;
-  });
-  return changed ? { ...book, cashCloses } : null;
-}
-
 async function openCredits(sql: Awaited<ReturnType<typeof import("@/lib/db").getSql>>): Promise<OpenCredit[]> {
-  await healStaleCredits(sql);
   const bookRow = await sql<{ data: LedgerData | string }>`select data from centre_book where id = 'centre'`;
   const book = bookRow[0] ? asJson(bookRow[0].data) : null;
   const names = new Map((book?.employees ?? []).map((employee) => [employee.id, employee.name]));
@@ -1109,7 +1031,6 @@ export const closingDesk = createServerFn({ method: "GET" })
     await ensureCustomerTable(sql);
     await ensureAdvanceTable(sql);
     await ensureServiceTable(sql);
-    await healStaleCredits(sql);
     const position = await positionAsOf(sql, date);
     const advance = await readClosingAdvance(sql, date);
     const payouts = (await readPayouts(sql, context.userId)).map(({ mine: _mine, ...item }) => item);
