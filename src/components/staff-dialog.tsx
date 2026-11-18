@@ -3,9 +3,8 @@ import { MoneyField } from "@/components/money-field";
 import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
 import { createEmployeeAccount, DEFAULT_STAFF_PASSWORD } from "@/lib/centre.functions";
-import { DESK_LABEL, deskOf } from "@/lib/ledger/calc";
 import { useLedger } from "@/lib/ledger/store";
-import type { Desk, Employee } from "@/lib/ledger/types";
+import type { Employee } from "@/lib/ledger/types";
 
 export function StaffDialog({
   open,
@@ -27,7 +26,7 @@ export function StaffDialog({
 
   useEffect(() => {
     if (open) {
-      setDraft(employee ? { ...employee, desk: employee.desk ?? deskOf(employee) } : fresh());
+      setDraft(employee ?? fresh());
       setUsername("");
       setPassword(DEFAULT_STAFF_PASSWORD);
       setUsernameEdited(false);
@@ -51,13 +50,8 @@ export function StaffDialog({
             onResult({ ok: false, message: "Not added. Enter a name." });
             return;
           }
-          if (!draft.desk) {
-            onResult({ ok: false, message: "Not added. Choose the desk." });
-            return;
-          }
-          const desk = draft.desk;
           const save = () => {
-            saveEmployee({ ...draft, name, desk, role: DESK_LABEL[desk] });
+            saveEmployee({ ...draft, name, role: draft.role.trim() || "Staff" });
             onOpenChange(false);
           };
           if (employee) {
@@ -122,18 +116,12 @@ export function StaffDialog({
             </Field>
           </>
         )}
-        <Field label="Desk">
-          <select
-            required
+        <Field label="Role">
+          <input
             className="h-11 w-full rounded-sm border border-line bg-bg px-3 text-base outline-none focus:border-accent"
-            value={draft.desk ?? ""}
-            onChange={(event) => setDraft({ ...draft, desk: event.target.value as Desk })}
-          >
-            <option value="">Choose the desk</option>
-            <option value="aadhaar">Aadhaar desk</option>
-            <option value="service">Service desk</option>
-            <option value="support">Support desk</option>
-          </select>
+            value={draft.role}
+            onChange={(event) => setDraft({ ...draft, role: event.target.value })}
+          />
         </Field>
         <div className="grid gap-3 sm:grid-cols-2">
           <Field label="Basic salary">
@@ -163,8 +151,7 @@ export function StaffDialog({
               onClick={() => {
                 const name = draft.name.trim() || employee.name;
                 const active = !draft.active;
-                const desk = draft.desk;
-                saveEmployee({ ...draft, name, role: desk ? DESK_LABEL[desk] : draft.role, desk, active });
+                saveEmployee({ ...draft, name, role: draft.role.trim() || "Staff", active });
                 onOpenChange(false);
                 onResult({
                   ok: true,

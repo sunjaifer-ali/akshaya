@@ -2,13 +2,12 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { Bar, BarChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { PageHeader } from "@/components/page-header";
-import { ChartFrame } from "@/components/chart-frame";
 import { chartColors } from "@/lib/chart-colors";
 import { cn } from "@/lib/cn";
 import { inr, signedInr } from "@/lib/format";
 import { diaryDesk, advanceDesk, customerCreditDesk, type OpenCredit } from "@/lib/centre.functions";
-import { accountLines, aewsCollection, checkClose, countStarted, unpaidCreditReport } from "@/lib/ledger/cash";
-import { centreSnapshot, dayOn, DESK_LABEL, deskOf, monthCollection, staffMonthRows } from "@/lib/ledger/calc";
+import { accountLines, aewsCollection, checkClose, unpaidCreditReport } from "@/lib/ledger/cash";
+import { centreSnapshot, monthCollection, staffMonthRows } from "@/lib/ledger/calc";
 import { addDays, formatDay, formatFull, formatMonthShort, fyMonths, fyStartYear, isSunday } from "@/lib/ledger/dates";
 import { useLedger } from "@/lib/ledger/store";
 import type { CashClose, CollectionDay, Employee, LeaveMark } from "@/lib/ledger/types";
@@ -38,8 +37,6 @@ function DeskPage() {
     book.deductLwp,
     today,
     book.payouts ?? [],
-    book.salaryPaid ?? [],
-    book.expenseLines ?? [],
   );
   const rows = staffMonthRows(
     book.employees,
@@ -51,7 +48,6 @@ function DeskPage() {
     snap.collection,
     book.deductLwp,
     today,
-    book.salaryPaid ?? [],
   );
   const onLeave = today
     ? book.leaves.filter((mark) => mark.date === today && mark.code !== "HD")
@@ -63,9 +59,7 @@ function DeskPage() {
       amount: monthCollection(book.days, item),
     }));
 
-  const lines = accountLines(book.cashCloses, book.days, book.holidays, book.payouts ?? []).filter(
-    (line) => line.unfixed !== 0 && line.date.startsWith(month),
-  );
+  const lines = accountLines(book.cashCloses, book.days, book.holidays, book.payouts ?? []).filter((line) => line.unfixed !== 0);
   const shortOpen = lines.filter((line) => line.unfixed < 0).reduce((sum, line) => sum + line.unfixed, 0);
   const excessOpen = lines.filter((line) => line.unfixed > 0).reduce((sum, line) => sum + line.unfixed, 0);
   const imported = today ? aewsCollection(book.days, today) : null;
@@ -102,106 +96,11 @@ function DeskPage() {
 
   return (
     <div>
-      <PageHeader kicker="DESK" title={book.centreName} lede={today ? formatFull(today) : "Centre book"} />
-
-      <section className="mt-4 grid gap-3 sm:grid-cols-3">
-        <StatusLink
-          to="/collections"
-          search={{ m: month }}
-          label="Today"
-          value={mounted ? (imported == null ? (today && isSunday(today) ? "Sunday" : "Not in") : inr(imported)) : "—"}
-          hint={mounted ? (imported == null ? (today && isSunday(today) ? "Holiday" : "No charges yet") : "From the counter") : "Collection"}
-          tone={mounted && imported == null && !(today && isSunday(today)) ? "warn" : "ink"}
-        />
-        <StatusLink
-          to="/closing"
-          search={{ d: today || `${month}-01` }}
-          label="Closing"
-          value={mounted ? closeWord.value : "—"}
-          hint={mounted ? closeWord.hint : "Notes and wallets"}
-          tone={mounted ? closeWord.tone : "ink"}
-        />
-        <StatusLink
-          to="/closing"
-          search={{ d: lines.at(-1)?.date || today || `${month}-01` }}
-          label="Still open"
-          value={mounted ? (shortOpen || excessOpen ? signedInr(shortOpen + excessOpen) : "Clear") : "—"}
-          hint={
-            mounted
-              ? shortOpen || excessOpen
-                ? `Short ${inr(Math.abs(shortOpen))} · Excess ${inr(excessOpen)}`
-                : "No short or excess left"
-              : "Accounts"
-          }
-          tone={mounted && shortOpen < 0 ? "bad" : mounted && excessOpen > 0 ? "warn" : "ink"}
-        />
-      </section>
-
-      <section className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <Stat label="Net collection" value={inr(snap.collection)} />
-        <Stat label="Expenses" value={inr(snap.expense)} />
-        <Stat label="Staff salary" value={inr(snap.salary)} />
-        <Stat label="Margin" value={inr(snap.margin)} tone={snap.margin < 0 ? "bad" : "good"} />
-      </section>
-
-      <section className="mt-4 grid gap-4 lg:grid-cols-5">
-        <div className="rounded-xl border border-line bg-surface p-5 lg:col-span-3">
-          <h2 className="font-display text-2xl">This year, month by month</h2>
-          <div className="print-chart relative mt-3 h-52 w-full min-w-0 shrink-0 overflow-hidden">
-            {mounted ? (
-              <ChartFrame>
-                <ResponsiveContainer width="100%" height={208} minWidth={0}>
-                  <BarChart data={points} barCategoryGap={8}>
-                    <XAxis dataKey="label" tick={{ fill: chartColors.faint, fontSize: 12 }} axisLine={false} tickLine={false} />
-                    <YAxis hide />
-                    <Tooltip
-                      cursor={{ fill: chartColors.line }}
-                      formatter={(value) => [inr(Number(value)), "Collection"]}
-                      contentStyle={{ border: `1px solid ${chartColors.line}`, borderRadius: 8, background: chartColors.surface }}
-                    />
-                    <Bar dataKey="amount" fill={chartColors.accent} radius={[4, 4, 0, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
-              </ChartFrame>
-            ) : null}
-          </div>
-          <div className="mt-4 grid gap-3 sm:grid-cols-2">
-            <Link to="/closing" search={{ d: today || `${month}-01` }} className="rounded-lg border border-line bg-bg p-4 hover:border-line-strong">
-              <CardText title="Closing" value={mounted ? closeWord.value : "—"} note="Cash, wallets and bank" />
-            </Link>
-            <Link to="/expenses" search={{ m: month }} className="rounded-lg border border-line bg-bg p-4 hover:border-line-strong">
-              <CardText title="Expenses" value={snap.expense > 0 ? inr(snap.expense) : "—"} note="Bills for this month" />
-            </Link>
-            <Link to="/centre" className="rounded-lg border border-line bg-bg p-4 hover:border-line-strong">
-              <CardText title="Centre month" value={snap.collection > 0 ? inr(snap.collection) : "—"} note="Collection and margin" />
-            </Link>
-            <Link to="/reports" className="rounded-lg border border-line bg-bg p-4 hover:border-line-strong">
-              <CardText title="Reports" value={inr(snap.margin)} note="Each month and each person" />
-            </Link>
-          </div>
-        </div>
-        <div className="rounded-xl border border-line bg-surface p-5 lg:col-span-2">
-          <h2 className="font-display text-2xl">Staff</h2>
-          <ul className="mt-3 divide-y divide-line">
-            {rows.length === 0 ? <li className="py-3 text-sm text-muted">Add staff from Salary.</li> : null}
-            {rows.map((row) => {
-              const mark = onLeave.find((item) => item.employeeId === row.employee.id);
-              return (
-                <li key={row.employee.id} className="flex items-center justify-between gap-3 py-3">
-                  <div>
-                    <p className="text-sm font-medium">{row.employee.name}</p>
-                    <p className="text-xs text-faint">{mark ? leaveWord(mark.code) : DESK_LABEL[deskOf(row.employee)]}</p>
-                  </div>
-                  <p className="text-lg font-medium tabular-nums">{inr(row.collection)}</p>
-                </li>
-              );
-            })}
-          </ul>
-          <Link to="/salary" search={{ m: month }} className="mt-2 inline-flex min-h-11 items-center text-sm font-medium text-accent">
-            Work out salary
-          </Link>
-        </div>
-      </section>
+      <PageHeader
+        kicker="DESK"
+        title={book.centreName}
+        lede={today ? formatFull(today) : "Centre book"}
+      />
 
       <section className="mt-4 rounded-xl border border-line bg-surface p-5">
         <h2 className="font-display text-2xl">Needs attention</h2>
@@ -257,6 +156,108 @@ function DeskPage() {
           </ul>
         ) : null}
       </section>
+
+      <section className="mt-4 grid gap-3 sm:grid-cols-3">
+        <StatusLink
+          to="/collections"
+          search={{ m: month }}
+          label="Today"
+          value={mounted ? (imported == null ? (today && isSunday(today) ? "Sunday" : "Not in") : inr(imported)) : "—"}
+          hint={mounted ? (imported == null ? (today && isSunday(today) ? "Holiday" : "No charges yet") : "From the counter") : "Collection"}
+          tone={mounted && imported == null && !(today && isSunday(today)) ? "warn" : "ink"}
+        />
+        <StatusLink
+          to="/closing"
+          search={{ d: today || `${month}-01` }}
+          label="Closing"
+          value={mounted ? closeWord.value : "—"}
+          hint={mounted ? closeWord.hint : "Notes and wallets"}
+          tone={mounted ? closeWord.tone : "ink"}
+        />
+        <StatusLink
+          to="/closing"
+          search={{ d: lines.at(-1)?.date || today || `${month}-01` }}
+          label="Still open"
+          value={mounted ? (shortOpen || excessOpen ? signedInr(shortOpen + excessOpen) : "Clear") : "—"}
+          hint={
+            mounted
+              ? shortOpen || excessOpen
+                ? `Short ${inr(Math.abs(shortOpen))} · Excess ${inr(excessOpen)}`
+                : "No short or excess left"
+              : "Accounts"
+          }
+          tone={mounted && shortOpen < 0 ? "bad" : mounted && excessOpen > 0 ? "warn" : "ink"}
+        />
+      </section>
+
+      <section className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <Stat label="Net collection" value={inr(snap.collection)} />
+        <Stat label="Expenses" value={inr(snap.expense)} />
+        <Stat label="Staff salary" value={inr(snap.salary)} />
+        <Stat
+          label="Margin"
+          value={inr(snap.margin)}
+          tone={snap.margin < 0 ? "bad" : "good"}
+        />
+      </section>
+
+      <section className="mt-4 grid gap-4 lg:grid-cols-5">
+        <div className="rounded-xl border border-line bg-surface p-5 lg:col-span-3">
+          <h2 className="font-display text-2xl">This year, month by month</h2>
+          <div className="print-chart mt-3 h-52">
+            {mounted ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={points} barCategoryGap={8}>
+                  <XAxis dataKey="label" tick={{ fill: chartColors.faint, fontSize: 12 }} axisLine={false} tickLine={false} />
+                  <YAxis hide />
+                  <Tooltip
+                    cursor={{ fill: chartColors.line }}
+                    formatter={(value) => [inr(Number(value)), "Collection"]}
+                    contentStyle={{ border: `1px solid ${chartColors.line}`, borderRadius: 8, background: chartColors.surface }}
+                  />
+                  <Bar dataKey="amount" fill={chartColors.accent} radius={[4, 4, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            ) : null}
+          </div>
+        </div>
+        <div className="rounded-xl border border-line bg-surface p-5 lg:col-span-2">
+          <h2 className="font-display text-2xl">Staff</h2>
+          <ul className="mt-3 divide-y divide-line">
+            {rows.length === 0 ? <li className="py-3 text-sm text-muted">Add staff from Salary.</li> : null}
+            {rows.map((row) => {
+              const mark = onLeave.find((item) => item.employeeId === row.employee.id);
+              return (
+                <li key={row.employee.id} className="flex items-center justify-between gap-3 py-3">
+                  <div>
+                    <p className="text-sm font-medium">{row.employee.name}</p>
+                    <p className="text-xs text-faint">{mark ? leaveWord(mark.code) : row.employee.role}</p>
+                  </div>
+                  <p className="text-lg font-medium tabular-nums">{inr(row.collection)}</p>
+                </li>
+              );
+            })}
+          </ul>
+          <Link to="/salary" search={{ m: month }} className="mt-2 inline-flex min-h-11 items-center text-sm font-medium text-accent">
+            Work out salary
+          </Link>
+        </div>
+      </section>
+
+      <section className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <Link to="/closing" search={{ d: today || `${month}-01` }} className="rounded-xl border border-line bg-surface p-5 hover:border-line-strong">
+          <CardText title="Closing" value={mounted ? closeWord.value : "—"} note="Cash, wallets and bank" />
+        </Link>
+        <Link to="/expenses" search={{ m: month }} className="rounded-xl border border-line bg-surface p-5 hover:border-line-strong">
+          <CardText title="Expenses" value={snap.expense > 0 ? inr(snap.expense) : "—"} note="Bills for this month" />
+        </Link>
+        <Link to="/centre" className="rounded-xl border border-line bg-surface p-5 hover:border-line-strong">
+          <CardText title="Centre month" value={snap.collection > 0 ? inr(snap.collection) : "—"} note="Collection and margin" />
+        </Link>
+        <Link to="/reports" className="rounded-xl border border-line bg-surface p-5 hover:border-line-strong">
+          <CardText title="Reports" value={inr(snap.margin)} note="Each month and each person" />
+        </Link>
+      </section>
     </div>
   );
 }
@@ -284,7 +285,6 @@ function StatusLink({
     >
       <p className="text-xs font-semibold tracking-widest text-faint">{label.toUpperCase()}</p>
       <p className={cn("mt-2 font-display text-4xl tabular-nums", tone === "bad" ? "text-bad" : tone === "warn" ? "text-warn" : "text-ink")}>{value}</p>
-      <p className="mt-1 text-sm text-muted">{hint}</p>
     </Link>
   );
 }
@@ -363,21 +363,21 @@ function morningReview(
   const yesterday = addDays(today, -1);
   if (!isSunday(yesterday) && !holidays.has(yesterday)) {
     const close = book.cashCloses.find((row) => row.date === yesterday);
-    if (!close || (!countStarted(close) && !close.accepted)) {
+    if (!close) {
       items.push({ tone: "warn", text: "Yesterday was not closed.", to: "/closing", search: { d: yesterday } });
     } else {
       const check = checkClose(close, book.cashCloses, book.days, book.holidays, book.payouts ?? []);
       const who = close.countedBy ? ` Counted by ${close.countedBy}.` : "";
       if (check.missing.length > 0) {
         items.push({ tone: "warn", text: `Yesterday’s closing is waiting for the counter.${who}`, to: "/closing", search: { d: yesterday } });
-      } else if (yesterday.slice(0, 7) === today.slice(0, 7) && (check.unfixed ?? 0) < 0) {
+      } else if ((check.unfixed ?? 0) < 0) {
         items.push({
           tone: "bad",
           text: `Yesterday was short by ${inr(Math.abs(check.unfixed ?? 0))}.${who}`,
           to: "/closing",
           search: { d: yesterday },
         });
-      } else if (yesterday.slice(0, 7) === today.slice(0, 7) && (check.unfixed ?? 0) > 0) {
+      } else if ((check.unfixed ?? 0) > 0) {
         items.push({ tone: "warn", text: `Yesterday was excess by ${inr(check.unfixed ?? 0)}.${who}`, to: "/closing", search: { d: yesterday } });
       }
     }
@@ -391,8 +391,8 @@ function morningReview(
     }
     return "";
   })();
-  const worked = lastWorking ? dayOn(book.days, lastWorking) : null;
-  if (worked && worked.amount > 0 && /entered on the counter/i.test(worked.note)) {
+  const worked = lastWorking ? book.days.find((day) => day.date === lastWorking && day.amount > 0 && /entered on the counter/i.test(day.note)) : undefined;
+  if (worked) {
     const planned = new Set(book.leaves.filter((mark) => mark.date === worked.date && mark.code !== "HD").map((mark) => mark.employeeId));
     const absent = book.employees.filter((employee) => employee.active && (worked.splits[employee.id] ?? 0) <= 0 && !planned.has(employee.id));
     if (absent.length > 0) {

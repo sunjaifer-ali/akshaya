@@ -3,15 +3,12 @@ import { useState } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { Bar, CartesianGrid, ComposedChart, Line, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { MoneyField } from "@/components/money-field";
-import { MonthBar } from "@/components/month-bar";
 import { PageHeader } from "@/components/page-header";
-import { ChartFrame } from "@/components/chart-frame";
 import { Button } from "@/components/ui/button";
 import { chartColors } from "@/lib/chart-colors";
 import { inr, inrShort, pct, signedInr } from "@/lib/format";
 import { centreSnapshot, type CentreSnapshot } from "@/lib/ledger/calc";
-import { checkClose } from "@/lib/ledger/cash";
-import { fyLabel, fyMonths, fyStartYear, formatDay, formatMonthShort } from "@/lib/ledger/dates";
+import { fyLabel, fyMonths, fyStartYear, formatMonthShort } from "@/lib/ledger/dates";
 import { useLedger } from "@/lib/ledger/store";
 import { readYear } from "@/lib/search";
 import { useMounted } from "@/lib/use-mounted";
@@ -46,33 +43,12 @@ function CentrePage() {
       book.deductLwp,
       today,
       book.payouts ?? [],
-      book.salaryPaid ?? [],
-      book.expenseLines ?? [],
     ),
   );
   const visible = rows.filter((row) => row.month <= anchor || row.collection > 0 || row.expense > 0);
   const [picked, setPicked] = useState(anchor);
-  const [view, setView] = useState<"day" | "month" | "year">("year");
-  const [day, setDay] = useState(today || "");
   const inThisYear = rows.find((row) => row.month === picked);
   const selected = inThisYear ?? visible[visible.length - 1] ?? rows[0];
-  const monthSnap =
-    inThisYear ??
-    centreSnapshot(
-      book.employees,
-      book.days,
-      book.perfOverrides,
-      book.leaves,
-      book.holidays,
-      book.expenses,
-      book.lyOverrides,
-      picked,
-      book.deductLwp,
-      today,
-      book.payouts ?? [],
-      book.salaryPaid ?? [],
-      book.expenseLines ?? [],
-    );
 
   const totals = visible.reduce(
     (sum, row) => ({
@@ -88,6 +64,8 @@ function CentrePage() {
   const pairedLast = paired.reduce((sum, row) => sum + (row.lastYearCompared ?? 0), 0);
   const growth = paired.length > 0 ? pairedCollection - pairedLast : null;
   const growthPct = pairedLast > 0 && growth != null ? (growth / pairedLast) * 100 : null;
+  const yearLast = visible.reduce((sum, row) => sum + (row.lastYear ?? 0), 0);
+  const yearLastKnown = visible.some((row) => row.lastYear != null);
 
   const chartRows = visible.map((row) => ({
     label: formatMonthShort(row.month),
@@ -130,7 +108,7 @@ function CentrePage() {
                           future ? "—" : row.salary,
                           future ? "—" : row.margin,
                           future ? "—" : pct(costPct(row)),
-                          row.lastYearCompared ?? "—",
+                          row.lastYear ?? "—",
                           row.collection > 0 ? row.growth ?? 0 : "—",
                           row.collection > 0 ? pct(row.growthPct) : "—",
                         ];
@@ -150,40 +128,14 @@ function CentrePage() {
         <Mini label="Net collection" value={inr(totals.collection)} />
         <Mini label="Expenses" value={inr(totals.expense + totals.salary)} />
         <Mini label="Margin" value={inr(totals.margin)} />
-        <Mini label="Growth vs last year" value={growth == null ? "—" : `${signedInr(growth)} (${pct(growthPct)})`} />
+        <Mini label="Growth" value={growth == null ? "—" : `${signedInr(growth)} · ${pct(growthPct)}`} />
       </section>
-      <div className="no-print mt-4 flex flex-wrap items-center gap-2">
-        {(["day", "month", "year"] as const).map((item) => (
-          <Button key={item} variant={view === item ? "primary" : "secondary"} onClick={() => setView(item)}>
-            {item === "day" ? "Date" : item === "month" ? "Month" : "Year"}
-          </Button>
-        ))}
-        {view === "day" ? (
-          <input type="date" aria-label="Statement date" className="h-11 rounded-sm border border-line bg-bg px-3 text-base" value={day || today} onChange={(event) => setDay(event.target.value)} />
-        ) : null}
-        {view === "month" ? <MonthBar month={picked} onChange={setPicked} /> : null}
-      </div>
-      {view === "day" ? <DayStatement date={day || today} /> : null}
-      {view === "month" ? (
-        <section className="mt-4 rounded-xl border border-line bg-surface p-5">
-          <h2 className="font-display text-2xl">{formatMonthShort(monthSnap.month)}</h2>
-          <div className="mt-3 grid gap-3 sm:grid-cols-4">
-            <Mini label="Collection" value={inr(monthSnap.collection)} />
-            <Mini label="Expense" value={inr(monthSnap.expense)} />
-            <Mini label="Salary" value={inr(monthSnap.salary)} />
-            <Mini label="Growth vs last year" value={monthSnap.growth == null ? "—" : `${signedInr(monthSnap.growth)} · ${pct(monthSnap.growthPct)}`} />
-          </div>
-        </section>
-      ) : null}
 
-      {view === "year" ? (
-      <>
       <section className="print-chart mt-4 rounded-xl border border-line bg-surface p-5">
         <h2 className="font-display text-2xl">Collection against last year</h2>
-        <div className="mt-3 h-64 min-w-0">
+        <div className="mt-3 h-64">
           {mounted ? (
-            <ChartFrame>
-            <ResponsiveContainer width="100%" height="100%" minWidth={0}>
+            <ResponsiveContainer width="100%" height="100%">
               <ComposedChart data={chartRows}>
                 <CartesianGrid vertical={false} stroke={chartColors.line} />
                 <XAxis dataKey="label" tick={{ fill: chartColors.faint, fontSize: 12 }} axisLine={false} tickLine={false} />
@@ -197,7 +149,6 @@ function CentrePage() {
                 <Line dataKey="margin" stroke={chartColors.ink} strokeWidth={2} dot={false} />
               </ComposedChart>
             </ResponsiveContainer>
-            </ChartFrame>
           ) : null}
         </div>
       </section>
@@ -229,7 +180,7 @@ function CentrePage() {
                   <Cell>{inr(row.salary)}</Cell>
                   <Cell tone={toneOf(row.margin)}>{inr(row.margin)}</Cell>
                   <Cell>{pct(costPct(row))}</Cell>
-                  <Cell>{row.lastYearCompared == null ? "—" : `${inr(row.lastYearCompared)}${row.lastYearPartial ? " so far" : ""}`}</Cell>
+                  <Cell>{row.lastYear == null ? "—" : inr(row.lastYear)}</Cell>
                   <Cell tone={toneOf(row.growth)}>{row.collection > 0 ? signedInr(row.growth) : "—"}</Cell>
                   <Cell tone={toneOf(row.growthPct)}>{row.collection > 0 ? pct(row.growthPct) : "—"}</Cell>
                 </tr>
@@ -241,7 +192,7 @@ function CentrePage() {
                 <Cell>{inr(totals.salary)}</Cell>
                 <Cell tone={toneOf(totals.margin)}>{inr(totals.margin)}</Cell>
                 <Cell>{pct(totals.collection > 0 ? ((totals.expense + totals.salary) / totals.collection) * 100 : null)}</Cell>
-                <Cell>{pairedLast > 0 ? inr(pairedLast) : "—"}</Cell>
+                <Cell>{yearLastKnown ? inr(yearLast) : "—"}</Cell>
                 <Cell tone={toneOf(growth)}>{growth == null ? "—" : signedInr(growth)}</Cell>
                 <Cell tone={toneOf(growthPct)}>{pct(growthPct)}</Cell>
               </tr>
@@ -249,28 +200,9 @@ function CentrePage() {
           </table>
         </div>
       </section>
-      </>
-      ) : null}
 
-      {view === "month" ? <MonthDetail row={monthSnap} onCommit={(amount) => book.setLastYear(monthSnap.month, amount)} /> : null}
-      {view === "year" && selected ? <MonthDetail row={selected} onCommit={(amount) => book.setLastYear(selected.month, amount)} /> : null}
+      {selected ? <MonthDetail row={selected} onCommit={(amount) => book.setLastYear(selected.month, amount)} /> : null}
     </div>
-  );
-}
-
-function DayStatement({ date }: { date: string }) {
-  const book = useLedger();
-  const amount = book.days.find((item) => item.date === date)?.amount ?? 0;
-  const close = book.cashCloses.find((item) => item.date === date);
-  const check = close ? checkClose(close, book.cashCloses, book.days, book.holidays, book.payouts ?? []) : null;
-  return (
-    <section className="mt-4 rounded-xl border border-line bg-surface p-5">
-      <h2 className="font-display text-2xl">{formatDay(date)}</h2>
-      <div className="mt-3 grid gap-3 sm:grid-cols-2">
-        <Mini label="Counter collection" value={inr(amount)} />
-        <Mini label="Closing" value={check?.difference == null ? "Not closed" : check.difference === 0 ? "Balanced" : check.difference < 0 ? `Short ${inr(Math.abs(check.difference))}` : `Excess ${inr(check.difference)}`} />
-      </div>
-    </section>
   );
 }
 

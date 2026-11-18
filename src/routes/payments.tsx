@@ -7,7 +7,7 @@ import { ResultDialog, type Result } from "@/components/result-dialog";
 import { addCentrePayout, listCentrePayouts, removeCentrePayout, type PayoutRow } from "@/lib/centre.functions";
 import { inr } from "@/lib/format";
 import { formatDay } from "@/lib/ledger/dates";
-import { STAFF_PAY_KINDS, payoutLabel } from "@/lib/ledger/types";
+import { payoutKind, payoutLabel } from "@/lib/ledger/types";
 import { useTodayKey } from "@/lib/use-today";
 
 export const Route = createFileRoute("/payments")({
@@ -21,10 +21,8 @@ function PaymentsPage() {
   const [role, setRole] = useState("employee");
   const [closed, setClosed] = useState(false);
   const [paid, setPaid] = useState("");
-  const [kind, setKind] = useState<(typeof STAFF_PAY_KINDS)[number]["id"]>("centre");
   const [amount, setAmount] = useState<number | null>(null);
   const [pending, setPending] = useState(false);
-  const [openDay, setOpenDay] = useState("");
   const [result, setResult] = useState<Result | null>(null);
 
   const load = () => {
@@ -42,7 +40,7 @@ function PaymentsPage() {
     load();
   }, [date]);
 
-  const todayRows = rows.filter((row) => row.date === date && (role !== "employee" || row.mine));
+  const todayRows = rows.filter((row) => row.date === date);
   const monthRows = rows.filter((row) => row.date !== date && row.date.startsWith(date.slice(0, 7)));
   const earlierDays = [...new Set(monthRows.map((row) => row.date))].sort((a, b) => (a < b ? 1 : -1));
   const total = todayRows.reduce((sum, row) => sum + row.amount, 0);
@@ -56,14 +54,10 @@ function PaymentsPage() {
         kicker="PAYMENTS"
         title="Paid from the centre"
       />
-      <section className="mb-4 rounded-xl border border-line bg-surface p-5">
-        <p className="text-xs font-semibold tracking-widest text-faint">PAID TODAY</p>
-        <p className="mt-1 font-display text-5xl tabular-nums">{inr(total)}</p>
-        {role !== "employee" && monthTotal > total ? <p className="mt-2 text-sm text-muted">This month {inr(monthTotal)}</p> : null}
-      </section>
+      <p className="mb-4 font-display text-3xl tabular-nums">{inr(total)}</p>
       {locked ? <p className="mb-4 text-sm text-muted">This day is closed. A new day starts tomorrow.</p> : null}
       <form
-        className="flex flex-wrap items-end gap-2 rounded-xl border border-line bg-surface p-3"
+        className="grid gap-3 rounded-xl border border-line bg-surface p-5 sm:grid-cols-2"
         onSubmit={(event) => {
           event.preventDefault();
           if (!date || locked) return;
@@ -73,11 +67,10 @@ function PaymentsPage() {
             return;
           }
           setPending(true);
-          void addCentrePayout({ data: { date, category: kind, amount: amount ?? 0, note: written } })
+          void addCentrePayout({ data: { date, category: payoutKind(written), amount: amount ?? 0, note: written } })
             .then(() => {
               setAmount(null);
               setPaid("");
-              setKind("centre");
               setResult({ ok: true, message: "Payment successfully saved." });
               load();
             })
@@ -85,33 +78,26 @@ function PaymentsPage() {
             .finally(() => setPending(false));
         }}
       >
-        <div className="flex w-full flex-wrap gap-2">
-          {STAFF_PAY_KINDS.map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              disabled={locked}
-              className={`min-h-11 rounded-sm border px-3 text-sm font-medium ${kind === item.id ? "border-accent bg-accent text-accent-ink" : "border-line bg-bg text-ink"}`}
-              onClick={() => setKind(item.id)}
-            >
-              {item.label}
-            </button>
-          ))}
-        </div>
-        <input
-          aria-label="What was paid"
-          className="h-12 min-w-40 flex-1 rounded-sm border border-line bg-bg px-3 text-base outline-none focus:border-accent disabled:bg-surface-2"
-          value={paid}
-          disabled={locked}
-          placeholder="Tea, stationery…"
-          onChange={(event) => setPaid(event.target.value.slice(0, 80))}
-        />
-        <div className="w-32">
+        <label className="block text-sm">
+          <span className="mb-1 block text-muted">What was paid</span>
+          <input
+            aria-label="What was paid"
+            className="h-11 w-full rounded-sm border border-line bg-bg px-3 text-base outline-none focus:border-accent disabled:bg-surface-2"
+            value={paid}
+            disabled={locked}
+            placeholder="eg. tea, stationery, donation"
+            onChange={(event) => setPaid(event.target.value.slice(0, 80))}
+          />
+        </label>
+        <label className="block text-sm">
+          <span className="mb-1 block text-muted">Amount</span>
           <MoneyField label="Amount paid" value={amount} disabled={locked} onChange={setAmount} />
+        </label>
+        <div className="sm:col-span-2">
+          <Button type="submit" disabled={locked || pending}>
+            Add payment
+          </Button>
         </div>
-        <Button type="submit" className="min-h-12" disabled={locked || pending}>
-          Add
-        </Button>
       </form>
       <ul className="mt-4 divide-y divide-line rounded-xl border border-line bg-surface">
         {todayRows.length === 0 ? <li className="px-4 py-4 text-sm text-muted">Nothing paid out today.</li> : null}
@@ -123,28 +109,18 @@ function PaymentsPage() {
         <section className="mt-4">
           <h2 className="font-medium">This month</h2>
           <p className="mt-1 text-sm text-muted">{inr(monthTotal)} paid out, including today.</p>
-          <ul className="mt-3 divide-y divide-line rounded-xl border border-line bg-surface">
-            {earlierDays.map((day) => {
-              const rows = monthRows.filter((row) => row.date === day);
-              const dayTotal = rows.reduce((sum, row) => sum + row.amount, 0);
-              const open = openDay === day;
-              return (
-                <li key={day}>
-                  <button type="button" className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left text-sm" onClick={() => setOpenDay(open ? "" : day)}>
-                    <span className="font-medium">{formatDay(day)}</span>
-                    <span className="tabular-nums">{inr(dayTotal)}</span>
-                  </button>
-                  {open ? (
-                    <ul className="divide-y divide-line border-t border-line">
-                      {rows.map((row) => (
-                        <PaymentLine key={row.id} row={row} canRemove={canRemove(row)} onRemove={() => remove(row.id)} />
-                      ))}
-                    </ul>
-                  ) : null}
-                </li>
-              );
-            })}
-          </ul>
+          {earlierDays.map((day) => (
+            <div key={day} className="mt-3">
+              <h3 className="text-xs font-semibold tracking-widest text-faint">{formatDay(day)}</h3>
+              <ul className="mt-1 divide-y divide-line rounded-xl border border-line bg-surface">
+                {monthRows
+                  .filter((row) => row.date === day)
+                  .map((row) => (
+                    <PaymentLine key={row.id} row={row} canRemove={canRemove(row)} onRemove={() => remove(row.id)} />
+                  ))}
+              </ul>
+            </div>
+          ))}
         </section>
       ) : null}
       <ResultDialog result={result} onClose={() => setResult(null)} />
@@ -166,10 +142,7 @@ function PaymentLine({ row, canRemove, onRemove }: { row: PayoutRow; canRemove: 
     <li className="flex items-center justify-between gap-3 px-4 py-3 text-sm">
       <span>
         <span className="font-medium">{row.note || payoutLabel(row.category)}</span>
-        <span className="mt-0.5 block text-xs text-faint">
-          {payoutLabel(row.category)}
-          {row.by ? ` · ${row.by}` : ""}
-        </span>
+        <span className="text-muted"> · {row.by}</span>
       </span>
       <span className="flex items-center gap-2">
         <span className="tabular-nums">{inr(row.amount)}</span>

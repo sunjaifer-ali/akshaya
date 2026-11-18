@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
+import { CentreCredit } from "@/components/centre-credit";
 import { authClient, markDeskOpen } from "@/lib/auth/client";
 import { centreHasAdmin, claimAdmin, loginChoices, recordLogin, type LoginChoice } from "@/lib/centre.functions";
 import { centreEmail, cleanUsername } from "@/lib/username";
@@ -76,8 +77,7 @@ function LoginPage() {
         markDeskOpen();
         await recordLogin({ data: { screen: `${window.screen.width}×${window.screen.height}` } }).catch(() => undefined);
       }
-      const home = chosen?.role === "employee" ? "/counter" : chosen?.role === "closer" ? "/closing" : "/";
-      window.location.assign(home);
+      window.location.assign("/");
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not sign in.");
     } finally {
@@ -88,17 +88,15 @@ function LoginPage() {
   return (
     <main className="mx-auto flex min-h-dvh w-full max-w-sm flex-col items-center justify-center px-4 py-10">
       <form
-        className="w-full rounded-xl border border-line bg-surface px-6 py-8 shadow-lg"
+        className="w-full rounded-xl border border-line bg-surface px-6 py-8"
         onSubmit={(event) => {
           event.preventDefault();
           void submit();
         }}
       >
-        <div className="mx-auto mb-4 flex h-28 w-28 items-center justify-center rounded-full bg-accent-soft">
-          <img src="/akshaya-logo.png" alt="Akshaya" width="112" height="89" className="h-auto w-20" />
-        </div>
-        <h1 className="text-center font-display text-5xl leading-tight text-accent">Akshaya</h1>
-        <p className="mt-1 text-center text-lg text-muted">Thrikkadeeri</p>
+        <img src="/akshaya-logo.png" alt="Akshaya" className="mx-auto mb-4 h-auto w-28" />
+        <p className="text-center text-xs font-semibold tracking-widest text-accent">AKSHAYA</p>
+        <h1 className="text-center font-display text-4xl leading-tight">Thrikkadeeri</h1>
         <p className="mt-2 text-center text-sm text-muted">
           {mode === "create"
             ? "Create the admin account. Staff and closing accounts are added later from Settings."
@@ -167,9 +165,7 @@ function LoginPage() {
           </div>
         ) : null}
       </form>
-      <p className="mt-6 max-w-sm text-center text-xs leading-relaxed text-muted">
-        App developed for Akshaya Centre Thrikkadeeri by Jaifer M. E-mail: akspkd209@gmail.com. Mob: 9495663369
-      </p>
+      <CentreCredit />
     </main>
   );
 }

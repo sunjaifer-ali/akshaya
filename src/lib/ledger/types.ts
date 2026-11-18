@@ -1,12 +1,9 @@
 export type LeaveCode = "CL" | "SL" | "LWP" | "HD" | "WO";
 
-export type Desk = "aadhaar" | "service" | "support";
-
 export type Employee = {
   id: string;
   name: string;
   role: string;
-  desk?: Desk;
   basic: number;
   incentive: number;
   active: boolean;
@@ -49,11 +46,6 @@ export type CreditGiven = {
   amount: number;
 };
 
-export type CashInLine = {
-  amount: number;
-  note: string;
-};
-
 export type CashClose = {
   date: string;
   notes: NoteCounts;
@@ -71,12 +63,7 @@ export type CashClose = {
   advanceIn?: number;
   profitTaken?: number;
   profitNote?: string;
-  transfers?: CashInLine[];
-  cashIn?: number;
-  cashInNote?: string;
-  cashIns?: CashInLine[];
   creditSeparate?: boolean;
-  personalBalance?: number;
 };
 
 export type CentrePayout = {
@@ -94,22 +81,10 @@ export const PAYOUT_KINDS = [
   { id: "stationery", label: "Stationery" },
   { id: "donation", label: "Donation" },
   { id: "other", label: "Other" },
-  { id: "centre", label: "Centre expense" },
-  { id: "personal", label: "Personal expense" },
-] as const;
-
-export const STAFF_PAY_KINDS = [
-  { id: "centre", label: "Centre expense" },
-  { id: "personal", label: "Personal expense" },
-  { id: "other", label: "Other expense" },
 ] as const;
 
 export function payoutLabel(category: string): string {
-  return STAFF_PAY_KINDS.find((item) => item.id === category)?.label ?? PAYOUT_KINDS.find((item) => item.id === category)?.label ?? "Other";
-}
-
-export function isPersonalPayout(category: string): boolean {
-  return category === "personal";
+  return PAYOUT_KINDS.find((item) => item.id === category)?.label ?? "Other";
 }
 
 export function payoutKind(text: string): string {
@@ -119,32 +94,6 @@ export function payoutKind(text: string): string {
   if (value.includes("station")) return "stationery";
   if (value.includes("donat")) return "donation";
   return "other";
-}
-
-export type ExpenseLine = {
-  id: string;
-  month: string;
-  name: string;
-  category: string;
-  amount: number;
-};
-
-export const EXPENSE_KINDS = [
-  { id: "general", label: "General" },
-  { id: "maintenance", label: "Maintenance" },
-  { id: "accessories", label: "Accessories" },
-  { id: "stationery", label: "Stationery" },
-  { id: "others", label: "Others" },
-  { id: "bad", label: "Bad credit" },
-  { id: "self", label: "Self expenses" },
-] as const;
-
-export function expenseKindLabel(category: string): string {
-  return EXPENSE_KINDS.find((item) => item.id === category)?.label ?? "Others";
-}
-
-export function isSelfExpense(category: string): boolean {
-  return category === "self";
 }
 
 export type LeaveMark = {
@@ -159,14 +108,6 @@ export type PerfOverride = {
   amount: number;
 };
 
-export type SalaryPaid = {
-  employeeId: string;
-  month: string;
-  basic: number;
-  incentive: number;
-  confirmed: boolean;
-};
-
 export type LedgerData = {
   centreName: string;
   deductLwp: boolean;
@@ -176,14 +117,12 @@ export type LedgerData = {
   days: CollectionDay[];
   categories: ExpenseCategory[];
   expenses: Record<string, Record<string, number>>;
-  expenseLines: ExpenseLine[];
   leaves: LeaveMark[];
   holidays: string[];
   perfOverrides: PerfOverride[];
   lyOverrides: Record<string, number>;
   cashCloses: CashClose[];
   payouts?: CentrePayout[];
-  salaryPaid: SalaryPaid[];
 };
 
 export const DEFAULT_CATEGORIES: ExpenseCategory[] = [
