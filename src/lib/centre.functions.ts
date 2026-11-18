@@ -320,7 +320,7 @@ export type OpenCredit = { customer: string; mobile: string; staff: string; bala
 
 export const addCustomerMove = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
-  .validator((input: { kind: string; customer: string; mobile: string; amount: number; serviceCharge?: number; department?: number }) => {
+  .validator((input: { kind: string; customer: string; mobile: string; amount: number; serviceCharge?: number; department?: number; creditDate?: string }) => {
     const kind = input.kind === "debit" ? "debit" : input.kind === "credit" ? "credit" : "";
     const customer = input.customer.trim().slice(0, 80);
     const mobile = optionalMobile(input.mobile);
@@ -328,10 +328,11 @@ export const addCustomerMove = createServerFn({ method: "POST" })
     const departmentPay = Math.max(0, Math.round(Number(input.department) || 0));
     const split = kind === "credit" && (serviceCharge > 0 || departmentPay > 0);
     const amount = split ? serviceCharge + departmentPay : Math.round(Number(input.amount));
+    const creditDate = /^\d{4}-\d{2}-\d{2}$/.test(String(input.creditDate ?? "")) ? String(input.creditDate) : "";
     if (!kind) throw new Error("Choose credit or debit.");
     if (!customer) throw new Error("Enter the customer name.");
     if (!Number.isFinite(amount) || amount <= 0 || amount > 100000) throw new Error("Enter the amount.");
-    return { kind, customer, mobile, amount, serviceCharge: split ? serviceCharge : 0, department: split ? departmentPay : 0 };
+    return { kind, customer, mobile, amount, serviceCharge: split ? serviceCharge : 0, department: split ? departmentPay : 0, creditDate };
   })
   .handler(async ({ context, data }) => {
     const role = await requireMember(context.userId);
@@ -339,16 +340,20 @@ export const addCustomerMove = createServerFn({ method: "POST" })
     const date = indiaToday();
     return withTransaction(async (sql) => {
       await ensureCustomerTable(sql);
+      let due: OpenCredit | undefined;
       if (data.kind === "debit") {
         const open = await openCredits(sql);
-        const due = findOpenCredit(open, data.customer, data.mobile);
+        due = findOpenCredit(open, data.customer, data.mobile, data.creditDate);
         if (!due || due.balance < data.amount) throw new Error("That customer does not owe this much.");
       }
       const member = await sql<{ name: string }>`select name from centre_member where user_id = ${context.userId}`;
       const staff = (member[0]?.name || "Staff").trim().slice(0, 80);
       const id = crypto.randomUUID();
-      await sql`insert into customer_move (id, taken_on, user_id, staff_name, customer, mobile, kind, amount)
-        values (${id}, ${date}, ${context.userId}, ${staff}, ${data.customer}, ${data.mobile}, ${data.kind}, ${data.amount})`;
+      const customer = due?.customer || data.customer;
+      const mobile = due?.mobile || data.mobile;
+      const sourceDate = data.kind === "debit" ? due?.date || data.creditDate : "";
+      await sql`insert into customer_move (id, taken_on, user_id, staff_name, customer, mobile, kind, amount, source_date)
+        values (${id}, ${date}, ${context.userId}, ${staff}, ${customer}, ${mobile}, ${data.kind}, ${data.amount}, ${sourceDate})`;
       if (data.kind === "credit" && data.serviceCharge > 0) {
         await ensureServiceTable(sql);
         await sql`insert into service_entry (id, taken_on, user_id, staff_name, service, customer, mobile, amount, personal_gpay, department, bank_department, pay_mode, cash_part, credit_move_id)
@@ -579,17 +584,89 @@ async function ensureCustomerTable(sql: Awaited<ReturnType<typeof import("@/lib/
     )`,
   );
   await sql.query(`create index if not exists customer_move_taken_on on customer_move (taken_on)`);
+  await sql.query(`alter table customer_move add column if not exists source_date text`);
   customerTableReady = true;
 }
 
-type OpenRow = { key: string; customer: string; mobile: string; staff: string; balance: number; date: string };
+type OpenRow = { key: string; customer: string; mobile: string; staff: string; balance: number; opened: number; date: string };
 
-function findOpenCredit(open: OpenCredit[], customer: string, mobile: string): OpenCredit | undefined {
-  const exact = open.find((line) => creditKey(line.customer, line.mobile) === creditKey(customer, mobile));
-  if (exact) return exact;
-  if (mobile) return undefined;
-  const named = open.filter((line) => creditKey(line.customer) === creditKey(customer));
-  return named.length === 1 ? named[0] : undefined;
+function creditName(name: string): string {
+  return name.trim().toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function addOpenCredit(
+  lines: OpenRow[],
+  item: { customer: string; mobile: string; staff: string; amount: number; date: string },
+  fromClose = false,
+) {
+  const amount = Math.round(item.amount);
+  const name = creditName(item.customer);
+  if (amount <= 0 || !name) return;
+  if (lines.some((line) => line.date === item.date && line.opened === amount && creditName(line.customer) === name)) return;
+  if (fromClose && lines.some((line) => line.opened === amount && creditName(line.customer) === name)) return;
+  lines.push({
+    key: `${name}|${item.date}|${lines.length}`,
+    customer: item.customer.trim(),
+    mobile: item.mobile,
+    staff: item.staff,
+    balance: amount,
+    opened: amount,
+    date: item.date,
+  });
+}
+
+function payOpenCredit(lines: OpenRow[], name: string, amount: number, date: string, mobile = "", sourceDate = "") {
+  let left = Math.round(amount);
+  if (left <= 0) return;
+  const open = () => lines.filter((line) => line.balance > 0);
+  const want = creditName(name);
+  const stem = (value: string) => value.replace(/[aeiou]/g, "");
+  const samePerson = (line: OpenRow) => {
+    const current = creditName(line.customer);
+    if (!want || !current) return false;
+    if (current === want) return true;
+    const a = stem(current);
+    const b = stem(want);
+    return a.length >= 3 && a === b;
+  };
+  const tapped = sourceDate ? open().filter((line) => line.date === sourceDate && samePerson(line)) : [];
+  if (tapped.length >= 1) {
+    const exact = tapped.find((line) => line.balance === left) ?? tapped[0];
+    const take = Math.min(exact.balance, left);
+    exact.balance -= take;
+    return;
+  }
+  let targets = open().filter(samePerson);
+  if (targets.length === 0 && mobile) {
+    const digits = mobile.replace(/\D/g, "");
+    if (digits) targets = open().filter((line) => line.mobile.replace(/\D/g, "") === digits);
+  }
+  if (targets.length === 0) {
+    const only = open().filter((line) => line.balance === left);
+    if (only.length === 1) targets = only;
+  }
+  const exact = targets.filter((line) => line.balance === left);
+  if (exact.length >= 1) {
+    exact.sort((a, b) => (a.date < b.date ? -1 : 1))[0].balance = 0;
+    return;
+  }
+  const ordered = [...targets].sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+  for (const line of ordered) {
+    if (left <= 0) break;
+    const take = Math.min(line.balance, left);
+    line.balance -= take;
+    left -= take;
+  }
+}
+function findOpenCredit(open: OpenCredit[], customer: string, mobile: string, creditDate = ""): OpenCredit | undefined {
+  const want = creditName(customer);
+  const named = open.filter((line) => creditName(line.customer) === want || (creditDate && line.date === creditDate && creditName(line.customer) === want));
+  const pool = named.length > 0 ? named : open.filter((line) => creditDate && line.date === creditDate && creditName(line.customer) === want);
+  const dated = creditDate ? pool.filter((line) => line.date === creditDate) : [];
+  if (dated.length === 1) return dated[0];
+  if (dated.length > 1) return dated.find((line) => !mobile || !line.mobile || line.mobile.replace(/\D/g, "") === mobile.replace(/\D/g, "")) ?? dated[0];
+  if (pool.length === 1) return pool[0];
+  return pool.find((line) => !mobile || !line.mobile || line.mobile.replace(/\D/g, "") === mobile.replace(/\D/g, ""));
 }
 
 function creditKey(name: string, mobile = ""): string {
@@ -598,64 +675,16 @@ function creditKey(name: string, mobile = ""): string {
   return digits ? `${base}|${digits}` : base;
 }
 
-function addOpenCredit(
-  lines: OpenRow[],
-  item: { customer: string; mobile: string; staff: string; amount: number; date: string },
-) {
-  const amount = Math.round(item.amount);
-  if (amount <= 0) return;
-  const key = creditKey(item.customer, item.mobile);
-  if (!key) return;
-  const existing = lines.find((line) => line.key === key);
-  if (existing) {
-    if (existing.balance <= 0) existing.date = item.date;
-    existing.balance += amount;
-    if (!existing.mobile && item.mobile) existing.mobile = item.mobile;
-    if (item.staff) existing.staff = item.staff;
-    return;
-  }
-  lines.push({ key, customer: item.customer.trim(), mobile: item.mobile, staff: item.staff, balance: amount, date: item.date });
-}
-
-function payOpenCredit(lines: OpenRow[], name: string, amount: number, date: string, mobile = "") {
-  let left = Math.round(amount);
-  if (left <= 0 || !creditKey(name)) return;
-  const apply = (targets: OpenRow[]) => {
-    const ordered = [...targets.filter((line) => line.date === date), ...targets.filter((line) => line.date !== date)];
-    for (const line of ordered) {
-      if (left <= 0) break;
-      const take = Math.min(line.balance, left);
-      line.balance -= take;
-      left -= take;
-    }
-  };
-  const open = () => lines.filter((line) => line.balance > 0);
-  const exact = open().filter((line) => line.key === creditKey(name, mobile));
-  if (exact.length > 0) {
-    apply(exact);
-    return;
-  }
-  const named = open().filter((line) => creditKey(line.customer) === creditKey(name));
-  if (named.length === 1) {
-    apply(named);
-    return;
-  }
-  const sameAmount = named.filter((line) => line.balance === left);
-  const sameDay = sameAmount.filter((line) => line.date === date);
-  if (sameDay.length === 1) apply(sameDay);
-  else if (sameAmount.length === 1) apply(sameAmount);
-}
-
 function foldCredits(
   closes: CashClose[],
-  moves: { taken_on: string; customer: string; mobile: string; staff_name: string; kind: string; amount: number }[],
+  moves: { taken_on: string; customer: string; mobile: string; staff_name: string; kind: string; amount: number; source_date?: string | null }[],
   names: Map<string, string>,
   asOf = "",
-  trustMovesFrom = "",
+  _trustMovesFrom = "",
 ): OpenRow[] {
   const lines: OpenRow[] = [];
   const dated = moves
-    .map((move) => ({ ...move, date: dayText(move.taken_on) }))
+    .map((move) => ({ ...move, date: dayText(move.taken_on), sourceDate: dayText(move.source_date ?? "") }))
     .filter((move) => !asOf || move.date <= asOf);
   const used = closes.filter((close) => !asOf || close.date <= asOf);
   const byDate = new Map<string, typeof dated>();
@@ -668,31 +697,42 @@ function foldCredits(
   for (const date of dates) {
     const dayMoves = byDate.get(date) ?? [];
     const close = used.find((item) => item.date === date);
-    const credits = dayMoves.filter((move) => move.kind === "credit");
-    const debits = dayMoves.filter((move) => move.kind === "debit");
-    if (credits.length > 0) {
-      for (const move of credits) {
-        addOpenCredit(lines, {
-          customer: move.customer,
-          mobile: move.mobile,
-          staff: move.staff_name,
-          amount: Number(move.amount) || 0,
-          date,
-        });
-      }
-    } else {
-      for (const item of close?.creditGiven ?? []) {
-        addOpenCredit(lines, {
+    for (const move of dayMoves.filter((item) => item.kind === "credit")) {
+      addOpenCredit(lines, {
+        customer: move.customer,
+        mobile: move.mobile,
+        staff: move.staff_name,
+        amount: Number(move.amount) || 0,
+        date,
+      });
+    }
+    for (const item of close?.creditGiven ?? []) {
+      addOpenCredit(
+        lines,
+        {
           customer: item.customer ?? "",
           mobile: "",
           staff: names.get(item.employeeId) ?? "",
           amount: item.amount,
           date,
-        });
-      }
+        },
+        true,
+      );
     }
-    const fromMoves = debits.map((move) => ({ name: move.customer, mobile: move.mobile, amount: Number(move.amount) || 0 }));
-    const fromClose = (close?.creditPaid ?? []).map((item) => ({ name: item.name ?? "", mobile: "", amount: item.amount || 0 }));
+  }
+  const payments: { name: string; mobile: string; amount: number; date: string; sourceDate: string }[] = [];
+  for (const date of dates) {
+    const dayMoves = byDate.get(date) ?? [];
+    const close = used.find((item) => item.date === date);
+    const debits = dayMoves.filter((move) => move.kind === "debit");
+    const fromMoves = debits.map((move) => ({
+      name: move.customer,
+      mobile: move.mobile,
+      amount: Number(move.amount) || 0,
+      date,
+      sourceDate: move.sourceDate,
+    }));
+    const fromClose = (close?.creditPaid ?? []).map((item) => ({ name: item.name ?? "", mobile: "", amount: item.amount || 0, date, sourceDate: "" }));
     const covered = fromMoves.map((item) => ({ name: creditKey(item.name), amount: item.amount, used: false }));
     const extras = fromClose.filter((item) => {
       const hit = covered.find((row) => !row.used && row.name === creditKey(item.name) && row.amount === item.amount);
@@ -700,12 +740,12 @@ function foldCredits(
       hit.used = true;
       return false;
     });
-    const payments = fromMoves.length > 0 ? [...fromMoves, ...extras] : fromClose;
-    for (const item of payments) payOpenCredit(lines, item.name, item.amount, date, item.mobile);
+    payments.push(...(fromMoves.length > 0 ? [...fromMoves, ...extras] : fromClose));
     for (const move of dayMoves.filter((item) => item.kind === "writeoff")) {
-      payOpenCredit(lines, move.customer, Number(move.amount) || 0, date, move.mobile);
+      payments.push({ name: move.customer, mobile: move.mobile, amount: Number(move.amount) || 0, date, sourceDate: move.sourceDate });
     }
   }
+  for (const item of payments) payOpenCredit(lines, item.name, item.amount, item.date, item.mobile, item.sourceDate);
   return lines;
 }
 
@@ -800,8 +840,8 @@ async function openCredits(sql: Awaited<ReturnType<typeof import("@/lib/db").get
   const bookRow = await sql<{ data: LedgerData | string }>`select data from centre_book where id = 'centre'`;
   const book = bookRow[0] ? asJson(bookRow[0].data) : null;
   const names = new Map((book?.employees ?? []).map((employee) => [employee.id, employee.name]));
-  const moves = await sql<{ taken_on: string; customer: string; mobile: string; staff_name: string; kind: string; amount: number }>`
-    select taken_on::text as taken_on, customer, mobile, staff_name, kind, amount from customer_move order by created_at
+  const moves = await sql<{ taken_on: string; customer: string; mobile: string; staff_name: string; kind: string; amount: number; source_date: string | null }>`
+    select taken_on::text as taken_on, customer, mobile, staff_name, kind, amount, source_date from customer_move order by created_at
   `;
   const trustMovesFrom = earliestMove(moves.map((move) => move.taken_on));
   return foldCredits(book?.cashCloses ?? [], moves, names, "", trustMovesFrom)
@@ -918,8 +958,8 @@ async function positionAsOf(sql: Awaited<ReturnType<typeof import("@/lib/db").ge
   })());
   const employees = book?.employees ?? [];
   const names = new Map(employees.map((employee) => [employee.id, employee.name]));
-  const moves = await sql<{ taken_on: string; customer: string; mobile: string; staff_name: string; kind: string; amount: number }>`
-    select taken_on::text as taken_on, customer, mobile, staff_name, kind, amount
+  const moves = await sql<{ taken_on: string; customer: string; mobile: string; staff_name: string; kind: string; amount: number; source_date: string | null }>`
+    select taken_on::text as taken_on, customer, mobile, staff_name, kind, amount, source_date
     from customer_move where taken_on <= ${asOf} order by created_at
   `;
   const lines = foldCredits(book?.cashCloses ?? [], moves, names, asOf, earliestMove(moves.map((move) => move.taken_on)));
