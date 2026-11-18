@@ -12,6 +12,8 @@ import {
   cashInHand,
   checkClose,
   countStarted,
+  creditGivenTotal,
+  creditPaidTotal,
   emptyNotes,
   moneyInHand,
   previousClose,
@@ -55,8 +57,7 @@ function ClosingPage() {
   const [payouts, setPayouts] = useState<CentrePayout[]>([]);
   const [payAmount, setPayAmount] = useState<number | null>(null);
   const [payNote, setPayNote] = useState("");
-  const [gpayByDate, setGpayByDate] = useState<Record<string, { amount: number; service: number; department: number; bank: number }>>({});
-  const [moveByDate, setMoveByDate] = useState<Record<string, { credit: number; repaid: number; advanceIn: number; advanceServed: number }>>({});
+  const [gpayByDate, setGpayByDate] = useState<Record<string, { service: number; department: number }>>({});
   const [cashAmount, setCashAmount] = useState<number | null>(null);
   const [cashFrom, setCashFrom] = useState("");
   const [transferAmount, setTransferAmount] = useState<number | null>(null);
@@ -108,15 +109,12 @@ function ClosingPage() {
         setLiveCredit(desk.credit);
         setLiveAdvance(desk.advance);
         setPayouts(desk.payouts);
-        const next: Record<string, { amount: number; service: number; department: number; bank: number }> = {};
-        for (const line of desk.counter ?? []) next[line.date] = { amount: line.amount, service: line.personal, department: line.department, bank: line.bank };
+        const next: Record<string, { service: number; department: number }> = {};
+        for (const line of desk.gpay) next[line.date] = { service: line.service, department: line.department };
         setGpayByDate(next);
-        const moves: Record<string, { credit: number; repaid: number; advanceIn: number; advanceServed: number }> = {};
-        for (const line of desk.movements ?? []) moves[line.date] = { credit: line.credit, repaid: line.repaid, advanceIn: line.advanceIn, advanceServed: line.advanceServed };
-        setMoveByDate(moves);
       })
       .catch(() => undefined);
-  }, 60000, [date, role]);
+  }, 45000, [date, role]);
 
   const base = editing
     ? draft
@@ -141,6 +139,8 @@ function ClosingPage() {
   };
   const closing = moneyInHand(row);
   const cash = cashInHand(row.notes);
+  const paid = creditPaidTotal(row);
+  const givenTotal = creditGivenTotal(row);
   const counted = countStarted(row);
   const tallyReady = counted;
   const previewCloses = (tallyReady ? [...book.cashCloses.filter((item) => item.date !== date), row] : book.cashCloses).map((item) => {
@@ -152,28 +152,9 @@ function ClosingPage() {
   const daysForClose = book.days.map((day) => {
     const live = gpayByDate[day.date];
     if (!live) return day;
-    return { ...day, amount: live.amount, note: day.note.startsWith("Entered on the counter") ? day.note : "Entered on the counter", personalGpay: live.service, departmentGpay: live.department, bankDepartment: live.bank };
+    return { ...day, personalGpay: live.service, departmentGpay: live.department };
   });
-  for (const [day, live] of Object.entries(gpayByDate)) {
-    if (daysForClose.some((item) => item.date === day)) continue;
-    daysForClose.push({ date: day, amount: live.amount, note: "Entered on the counter", splits: {}, personalGpay: live.service, departmentGpay: live.department, bankDepartment: live.bank });
-  }
-  const withMovements = (closes: CashClose[]) => {
-    const map = new Map(closes.map((item) => [item.date, item]));
-    for (const [day, move] of Object.entries(moveByDate)) {
-      if (day === date) continue;
-      const current = map.get(day) ?? blank(day);
-      map.set(day, {
-        ...current,
-        creditGiven: move.credit > 0 ? [{ employeeId: "", customer: "", amount: move.credit }] : (current.creditGiven ?? []),
-        creditPaid: move.repaid > 0 ? [{ name: "", amount: move.repaid }] : (current.creditPaid ?? []),
-        advanceIn: move.advanceIn > 0 ? move.advanceIn : current.advanceIn,
-        advanceServed: move.advanceServed > 0 ? move.advanceServed : current.advanceServed,
-      });
-    }
-    return [...map.values()];
-  };
-  const check = checkClose(row, withMovements(previewCloses), daysForClose, book.holidays, payouts);
+  const check = checkClose(row, previewCloses, daysForClose, book.holidays, payouts);
   const lined = book.cashCloses.map((item) => {
     if (item.date === date) return { ...item, creditSeparate: separate, profitTaken: row.profitTaken, profitNote: row.profitNote, cashIn: row.cashIn, cashInNote: row.cashInNote, advanceHeld: row.advanceHeld, advanceServed: row.advanceServed };
     if (liveAdvance?.tracked && liveAdvance.lastDate && item.date === liveAdvance.lastDate) return { ...item, advanceHeld: liveAdvance.lastHeld };
@@ -250,8 +231,8 @@ function ClosingPage() {
 
       <p className="mb-4 text-sm text-muted">
         {formatFull(date)}
-        {saved && countStarted(saved) && !editing ? (saved.draft ? " · Draft" : " · Saved") : ""}
-        {saved && countStarted(saved) && !saved.draft ? ` · Closed by ${row.countedBy || "Admin"}` : ""}
+        {saved && countStarted(saved) && !editing ? " · Saved" : ""}
+        {saved && countStarted(saved) ? ` · Closed by ${row.countedBy || "Admin"}` : ""}
         {accepted ? " · Accepted" : ""}
       </p>
 
@@ -451,7 +432,7 @@ function ClosingPage() {
         <ClosingParts cash={cash} wallets={row.eDistrict + row.csc} bank={row.bank} />
       </section>
 
-      <CheckCard check={check} fixed={row.fixed} locked={!editing} hold={!tallyReady} onFixed={(fixed) => patch({ fixed })} />
+      <CheckCard date={date} check={check} fixed={row.fixed} paid={paid} given={givenTotal} locked={!editing} hold={!tallyReady} onFixed={(fixed) => patch({ fixed })} />
 
       {shorts.length + excesses.length > 0 ? (
         <details className="short-report mx-auto mt-3 max-w-lg rounded-xl border border-line bg-surface p-4">
@@ -475,7 +456,7 @@ function ClosingPage() {
           <Button
             onClick={() => {
               const closer = user?.displayName?.trim() || "Admin";
-              const next = { ...row, date, countedBy: closer, accepted: role === "admin" ? Boolean(saved?.accepted) : false, draft: false };
+              const next = { ...row, date, countedBy: closer, accepted: role === "admin" ? Boolean(saved?.accepted) : false };
               book.setCashClose(next);
               setDraft(next);
               setEditing(countStarted(next) ? false : true);
@@ -498,25 +479,7 @@ function ClosingPage() {
             Edit
           </Button>
         )}
-        {role === "admin" && editing && !locked ? (
-          <Button
-            variant="secondary"
-            onClick={() => {
-              const closer = user?.displayName?.trim() || "Admin";
-              const next = { ...row, date, countedBy: closer, accepted: false, draft: true };
-              book.setCashClose(next);
-              setDraft(next);
-              setEditing(countStarted(next) ? false : true);
-              setResult({ ok: true, message: "Draft saved. Staff can still enter charges." });
-              void pushClose(date, next).catch((error: unknown) => {
-                setResult({ ok: false, message: error instanceof Error ? error.message : "Saved on this browser, but not shared." });
-              });
-            }}
-          >
-            Save draft
-          </Button>
-        ) : null}
-        {role === "admin" && saved && !saved.draft && !editing ? (
+        {role === "admin" && saved && !editing ? (
           <Button
             onClick={() => {
               const next = {
@@ -525,7 +488,6 @@ function ClosingPage() {
                 creditPaid: liveCredit?.paid ?? saved.creditPaid,
                 credits: liveCredit?.unpaid ?? saved.credits,
                 accepted: !accepted,
-                draft: false,
               };
               book.setCashClose(next);
               setResult({
@@ -575,14 +537,20 @@ function ClosingPage() {
 }
 
 function CheckCard({
+  date,
   check,
   fixed,
+  paid,
+  given,
   locked,
   hold,
   onFixed,
 }: {
+  date: string;
   check: ReturnType<typeof checkClose>;
   fixed: number;
+  paid: number;
+  given: number;
   locked: boolean;
   hold: boolean;
   onFixed: (amount: number) => void;
@@ -614,9 +582,8 @@ function CheckCard({
         <Pair label="Counter collection" value={check.collected == null ? "—" : `+${inr(check.collected)}`} />
         {check.personalGpay > 0 ? <Pair label="Personal service, personal account only" value={`−${inr(check.personalGpay)}`} /> : null}
         {check.departmentGpay > 0 ? <Pair label="Personal department, personal account only" value={`−${inr(check.departmentGpay)}`} /> : null}
-        {check.bankDepartment > 0 ? <Pair label="Department paid from the centre" value={`−${inr(check.bankDepartment)}`} /> : null}
-        {check.creditGiven > 0 ? <Pair label="Credit given, not a shortage" value={`−${inr(check.creditGiven)}`} /> : null}
-        {check.creditPaid > 0 ? <Pair label="Credit repaid, not an excess" value={`+${inr(check.creditPaid)}`} /> : null}
+        {given > 0 ? <Pair label="Credit given, not a shortage" value={`−${inr(given)}`} /> : null}
+        {paid > 0 ? <Pair label="Credit repaid, not an excess" value={`+${inr(paid)}`} /> : null}
         {check.advanceIn > 0 ? <Pair label="Advance received, not an excess" value={`+${inr(check.advanceIn)}`} /> : null}
         {check.advanceServed > 0 ? <Pair label="Advance served, not a shortage" value={`−${inr(check.advanceServed)}`} /> : null}
         {check.cashIn > 0 ? <Pair label="Cash in, own bank, not income" value={`+${inr(check.cashIn)}`} /> : null}
@@ -633,7 +600,7 @@ function CheckCard({
             <span className="mb-1 block text-muted">Fixed</span>
             <MoneyField label="Amount fixed" value={fixed} disabled={locked} onChange={(amount) => onFixed(amount ?? 0)} />
           </label>
-          {fixed !== 0 && (check.unfixed ?? 0) !== 0 ? (
+          {fixed !== 0 ? (
             <p className="mt-2 text-sm">
               Still open {(check.unfixed ?? 0) < 0 ? "short" : "excess"}{" "}
               <span className={cn("font-medium tabular-nums", (check.unfixed ?? 0) < 0 ? "text-bad" : "text-warn")}>{inr(Math.abs(check.unfixed ?? 0))}</span>

@@ -160,7 +160,7 @@ export function Shell({ children }: { children: ReactNode }) {
     if (role !== "admin" && role !== "closer") return;
     if (pathname === "/closing") return;
     return pullSharedCloses();
-  }, 60000, [role, pathname]);
+  }, 20000, [role, pathname]);
 
   useEffect(() => {
     const clear = () => setUnreadMessages(0);
@@ -173,7 +173,7 @@ export function Shell({ children }: { children: ReactNode }) {
     return listNotices()
       .then((book) => setUnreadMessages(book.unread))
       .catch(() => undefined);
-  }, 45000, [role, pathname]);
+  }, 15000, [role, pathname]);
 
   if (pathname === "/login") return <>{children}</>;
 
