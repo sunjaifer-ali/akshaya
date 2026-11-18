@@ -121,7 +121,7 @@ function DiaryPage() {
             onDelete={(line) => act(removeDiary({ data: line.id }), "Note deleted.")}
           />
           <form
-            className="grid gap-3 rounded-xl border border-line bg-surface p-5 sm:grid-cols-2"
+            className="grid gap-2 rounded-xl border border-line bg-surface p-3 sm:grid-cols-2"
             onSubmit={(event) => {
               event.preventDefault();
               if (!forDate) return;
@@ -139,44 +139,37 @@ function DiaryPage() {
                 .finally(() => setPending(false));
             }}
           >
-            <label className="block text-sm sm:col-span-2">
-              <span className="mb-1 block text-muted">Note</span>
-              <input
-                className="h-11 w-full rounded-sm border border-line bg-bg px-3 text-base outline-none focus:border-accent"
-                value={note}
-                placeholder="eg. call when the certificate is ready"
-                onChange={(event) => setNote(event.target.value.slice(0, 240))}
-              />
-            </label>
-            <label className="block text-sm">
-              <span className="mb-1 block text-muted">Customer, if any</span>
-              <input
-                className="h-11 w-full rounded-sm border border-line bg-bg px-3 text-base outline-none focus:border-accent"
-                value={customer}
-                onChange={(event) => setCustomer(event.target.value.slice(0, 80))}
-              />
-            </label>
-            <label className="block text-sm">
-              <span className="mb-1 block text-muted">Mobile, if any</span>
-              <input
-                inputMode="numeric"
-                className="h-11 w-full rounded-sm border border-line bg-bg px-3 text-base outline-none focus:border-accent"
-                value={mobile}
-                onChange={(event) => setMobile(event.target.value)}
-              />
-            </label>
-            <label className="block text-sm">
-              <span className="mb-1 block text-muted">For</span>
-              <input
-                type="date"
-                aria-label="Note date"
-                className="h-11 w-full rounded-sm border border-line bg-bg px-3 text-base outline-none focus:border-accent"
-                value={forDate}
-                onChange={(event) => setForDate(event.target.value)}
-              />
-            </label>
+            <input
+              aria-label="Note"
+              className="h-12 w-full rounded-sm border border-line bg-bg px-3 text-base outline-none focus:border-accent sm:col-span-2"
+              value={note}
+              placeholder="Note"
+              onChange={(event) => setNote(event.target.value.slice(0, 240))}
+            />
+            <input
+              aria-label="Customer"
+              className="h-12 w-full rounded-sm border border-line bg-bg px-3 text-base outline-none focus:border-accent"
+              value={customer}
+              placeholder="Customer"
+              onChange={(event) => setCustomer(event.target.value.slice(0, 80))}
+            />
+            <input
+              aria-label="Mobile"
+              inputMode="numeric"
+              placeholder="Mobile"
+              className="h-12 w-full rounded-sm border border-line bg-bg px-3 text-base outline-none focus:border-accent"
+              value={mobile}
+              onChange={(event) => setMobile(event.target.value)}
+            />
+            <input
+              type="date"
+              aria-label="Note date"
+              className="h-12 w-full rounded-sm border border-line bg-bg px-3 text-base outline-none focus:border-accent"
+              value={forDate}
+              onChange={(event) => setForDate(event.target.value)}
+            />
             <div className="flex items-end">
-              <Button type="submit" disabled={pending}>
+              <Button type="submit" className="min-h-12" disabled={pending}>
                 Add note
               </Button>
             </div>

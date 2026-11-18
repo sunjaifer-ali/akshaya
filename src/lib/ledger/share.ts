@@ -31,12 +31,14 @@ function snapshot(): LedgerData {
     days: state.days,
     categories: state.categories,
     expenses: state.expenses,
+    expenseLines: state.expenseLines ?? [],
     leaves: state.leaves,
     holidays: state.holidays,
     perfOverrides: state.perfOverrides,
     lyOverrides: state.lyOverrides,
     cashCloses: state.cashCloses,
     payouts: state.payouts ?? [],
+    salaryPaid: state.salaryPaid ?? [],
   };
 }
 
@@ -48,6 +50,8 @@ function asBook(book: LedgerData): LedgerData {
     lyOverrides: book.lyOverrides ?? {},
     cashCloses: book.cashCloses ?? [],
     payouts: book.payouts ?? [],
+    salaryPaid: book.salaryPaid ?? [],
+    expenseLines: book.expenseLines ?? [],
     categories: withCategories(book.categories),
   };
 }
@@ -109,11 +113,17 @@ export async function startSharing(next: CentreRole): Promise<void> {
   touches = saved.touches;
 }
 
+let closePush = 0;
+
 export function watchAdminBook(): () => void {
   return useLedger.subscribe(() => {
     if (applying || role !== "admin") return;
     if (timer) clearTimeout(timer);
-    timer = setTimeout(() => {
+    const write = () => {
+      if (closePush > 0) {
+        timer = setTimeout(write, 400);
+        return;
+      }
       void saveSharedBook({ data: { book: snapshot(), touches } })
         .then((saved) => {
           touches = saved.touches;
@@ -125,7 +135,8 @@ export function watchAdminBook(): () => void {
           applying = false;
         })
         .catch(() => undefined);
-    }, 700);
+    };
+    timer = setTimeout(write, 700);
   });
 }
 
@@ -179,13 +190,19 @@ export async function pullSharedCloses(): Promise<void> {
 }
 
 export async function pushClose(date: string, close: CashClose | null): Promise<void> {
-  if (!role) return;
-  const saved = await saveSharedClose({ data: { date, close } });
-  touches = saved.touches;
-  if (role === "employee") {
+  if (!role) throw new Error("The book is still opening. Wait a moment, then save again.");
+  closePush += 1;
+  try {
+    if (!close) touches = { ...touches, [date]: new Date().toISOString() };
+    const saved = await saveSharedClose({ data: { date, close } });
+    touches = saved.touches;
+    const returned = (saved.book.cashCloses ?? []).find((item) => item.date === date) ?? null;
     applying = true;
-    useLedger.getState().replaceBook(asBook(saved.book));
+    if (returned) useLedger.getState().setCashClose(returned);
+    else useLedger.getState().clearCashClose(date);
     applying = false;
+  } finally {
+    closePush -= 1;
   }
 }
 

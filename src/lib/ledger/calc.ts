@@ -2,26 +2,65 @@ import { datesInMonth, isSunday, lastYearMonth } from "@/lib/ledger/dates";
 import type {
   CentrePayout,
   CollectionDay,
+  Desk,
   Employee,
+  ExpenseLine,
   LeaveCode,
   LeaveMark,
   PerfOverride,
+  SalaryPaid,
 } from "@/lib/ledger/types";
+import { isPersonalPayout, isSelfExpense } from "@/lib/ledger/types";
 
 export function monthDays(days: CollectionDay[], month: string): CollectionDay[] {
   return days.filter((day) => day.date.startsWith(month));
 }
 
 export function monthCollection(days: CollectionDay[], month: string): number {
-  return monthDays(days, month).reduce((sum, day) => sum + day.amount, 0);
+  return collectionRows(days, month).reduce((sum, day) => sum + day.amount, 0);
+}
+
+/** Daily counter rows win. A month-total sheet is used only when that month has no daily rows. One row per date. */
+function collectionRows(days: CollectionDay[], month: string): CollectionDay[] {
+  const rows = monthDays(days, month);
+  const daily = rows.filter((day) => !/centre sheet|month total/i.test(day.note));
+  const chosen = daily.some((day) => day.amount > 0) ? daily : rows;
+  const byDate = new Map<string, CollectionDay>();
+  for (const day of chosen) {
+    const prev = byDate.get(day.date);
+    if (!prev || rankDay(day) >= rankDay(prev)) byDate.set(day.date, day);
+  }
+  return [...byDate.values()];
+}
+
+function rankDay(day: CollectionDay): number {
+  if (/entered on the counter/i.test(day.note)) return 2;
+  if (/imported from aewskerala/i.test(day.note)) return 1;
+  return 0;
+}
+
+/** The one row that counts for a date. A month sheet is ignored once daily rows exist. */
+export function dayOn(days: CollectionDay[], date: string): CollectionDay | null {
+  return collectionRows(days, date.slice(0, 7)).find((day) => day.date === date) ?? null;
+}
+
+function isLump(rows: CollectionDay[]): boolean {
+  return rows.length > 0 && rows.every((day) => /centre sheet|month total/i.test(day.note));
 }
 
 export function daysEntered(days: CollectionDay[], month: string): number {
-  return monthDays(days, month).filter((day) => day.amount > 0).length;
+  return collectionRows(days, month).filter((day) => day.amount > 0).length;
 }
 
 export function splitSum(splits: Record<string, number>): number {
   return Object.values(splits).reduce((sum, amount) => sum + amount, 0);
+}
+
+/** One row per date. A centre-sheet lump is used only when that month has no daily rows. */
+function staffDays(days: CollectionDay[], month: string): CollectionDay[] {
+  const byDate = new Map<string, CollectionDay>();
+  for (const day of collectionRows(days, month)) byDate.set(day.date, day);
+  return [...byDate.values()];
 }
 
 export function employeeSplitSum(
@@ -29,7 +68,7 @@ export function employeeSplitSum(
   employeeId: string,
   month: string,
 ): number {
-  return monthDays(days, month).reduce((sum, day) => sum + (day.splits[employeeId] ?? 0), 0);
+  return staffDays(days, month).reduce((sum, day) => sum + (day.splits[employeeId] ?? 0), 0);
 }
 
 export function performanceOf(
@@ -38,9 +77,14 @@ export function performanceOf(
   employeeId: string,
   month: string,
 ): { amount: number; source: "book" | "entered" } {
+  const fromBook = employeeSplitSum(days, employeeId, month);
+  const countedOnCounter = staffDays(days, month).some(
+    (day) => !/centre sheet|month total/i.test(day.note) && (day.splits[employeeId] ?? 0) > 0,
+  );
+  if (countedOnCounter) return { amount: fromBook, source: "book" };
   const hit = overrides.find((item) => item.employeeId === employeeId && item.month === month);
   if (hit) return { amount: hit.amount, source: "entered" };
-  return { amount: employeeSplitSum(days, employeeId, month), source: "book" };
+  return { amount: fromBook, source: "book" };
 }
 
 export function workingDaysInMonth(month: string, holidays: string[]): number {
@@ -88,7 +132,7 @@ export function recordedAttendance(
 ): MonthAttendance {
   const closed = new Set(holidays);
   const recorded = new Set(
-    monthDays(days, month)
+    collectionRows(days, month)
       .map((day) => day.date)
       .filter((date) => !isSunday(date) && !closed.has(date)),
   );
@@ -158,10 +202,21 @@ export function expenseTotal(
   return Object.values(row).reduce((sum, amount) => sum + amount, 0);
 }
 
+export function expenseLineTotal(lines: ExpenseLine[] | undefined, month: string, which: "cost" | "self" = "cost"): number {
+  return (lines ?? []).reduce((sum, line) => {
+    if (line.month !== month) return sum;
+    const self = isSelfExpense(line.category);
+    if (which === "cost" && self) return sum;
+    if (which === "self" && !self) return sum;
+    return sum + (line.amount || 0);
+  }, 0);
+}
 export function payoutTotal(payouts: CentrePayout[] | undefined, month: string, categoryId?: string): number {
   return (payouts ?? []).reduce((sum, item) => {
     if (!item.date.startsWith(month)) return sum;
-    if (categoryId && item.category !== categoryId) return sum;
+    if (categoryId) {
+      if (item.category !== categoryId) return sum;
+    } else if (isPersonalPayout(item.category)) return sum;
     return sum + (item.amount || 0);
   }, 0);
 }
@@ -172,9 +227,12 @@ export function lastYearFigure(
   month: string,
   asOf = "",
 ): { amount: number | null; source: "book" | "entered" | "none"; partial: boolean } {
-  const prior = lastYearMonth(month);
+  const priorMonth = lastYearMonth(month);
   const inProgress = Boolean(asOf) && asOf.slice(0, 7) === month;
-  const bookDays = monthDays(days, prior).filter((day) => !inProgress || day.date.slice(8) <= asOf.slice(8));
+  const rows = collectionRows(days, priorMonth);
+  const lump = isLump(rows);
+  // A running month is compared with the same dates last year. A single month-total stays whole and is scaled later.
+  const bookDays = !inProgress || lump ? rows : rows.filter((day) => day.date.slice(8) <= asOf.slice(8));
   const book = bookDays.reduce((sum, day) => sum + day.amount, 0);
   if (book > 0) return { amount: book, source: "book", partial: inProgress };
   if (Object.prototype.hasOwnProperty.call(lyOverrides, month)) {
@@ -201,7 +259,10 @@ function comparableLastYear(
 ) {
   const prior = lastYearFigure(days, lyOverrides, month, asOf);
   const inProgress = Boolean(asOf) && asOf.slice(0, 7) === month;
-  if (!inProgress || prior.source !== "entered" || prior.amount == null) return prior;
+  if (!inProgress || prior.amount == null) return prior;
+  const priorDays = monthDays(days, lastYearMonth(month));
+  const lump = prior.source === "entered" || (priorDays.length > 0 && priorDays.every((day) => /centre sheet|month total/i.test(day.note)));
+  if (!lump) return prior;
   const full = workingDaysInMonth(month, holidays);
   const closed = new Set(holidays);
   const elapsed = datesInMonth(month).filter((date) => date <= asOf && !isSunday(date) && !closed.has(date)).length;
@@ -232,6 +293,7 @@ export function staffMonthRows(
   centreCollection: number,
   deductLwp: boolean,
   asOf = "",
+  salaryPaid: SalaryPaid[] = [],
 ): StaffMonthRow[] {
   const full = workingDaysInMonth(month, holidays);
   const inProgress = Boolean(asOf) && asOf.slice(0, 7) === month;
@@ -260,7 +322,11 @@ export function staffMonthRows(
           mark.date.startsWith(month) &&
           (!inProgress || mark.date <= asOf),
       ).length;
-      const pay = payFor(employee, perf.amount, lwp + half * 0.5, full, elapsed, deductLwp);
+      const pay = applyPaidSalary(
+        payFor(employee, perf.amount, lwp + half * 0.5, full, elapsed, deductLwp),
+        salaryPaid.find((item) => item.confirmed && item.employeeId === employee.id && item.month === month),
+        perf.amount,
+      );
       return {
         employee,
         collection: perf.amount,
@@ -275,23 +341,41 @@ export function salaryTotal(rows: StaffMonthRow[]): number {
   return rows.reduce((sum, row) => sum + row.pay.gross, 0);
 }
 
-export type Desk = "aadhaar" | "service" | "new";
+function applyPaidSalary(pay: PayBreakdown, paid: SalaryPaid | undefined, collection: number): PayBreakdown {
+  if (!paid) return pay;
+  const basicPayable = Math.max(0, Math.round(paid.basic) || 0);
+  const incentive = Math.max(0, Math.round(paid.incentive) || 0);
+  const gross = basicPayable + incentive;
+  return {
+    ...pay,
+    basicPayable,
+    incentive,
+    gross,
+    salaryPct: collection > 0 ? (basicPayable / collection) * 100 : null,
+    incentivePct: collection > 0 ? (incentive / collection) * 100 : null,
+    payPct: collection > 0 ? (gross / collection) * 100 : null,
+  };
+}
+
+export type { Desk };
 
 export function deskOf(employee: Employee): Desk {
-  const name = employee.name.trim().toLowerCase();
-  const role = employee.role.toLowerCase();
+  if (employee.desk === "aadhaar" || employee.desk === "service" || employee.desk === "support") return employee.desk;
+  const name = (employee.name ?? "").trim().toLowerCase();
+  const role = (employee.role ?? "").toLowerCase();
   if (role.includes("aadhaar") || role.includes("aadhar")) return "aadhaar";
-  if (role.includes("new") || role.includes("trainee") || role.includes("joinee")) return "new";
+  if (role.includes("support") || role.includes("new") || role.includes("trainee") || role.includes("joinee")) return "support";
   if (role.includes("service") || role.includes("middle")) return "service";
   if (name.includes("ajitha") || name.includes("haseena") || name.includes("hasena")) return "aadhaar";
-  if (name.includes("rubeena")) return "new";
+  if (name.includes("sheena") || name.includes("sajini")) return "service";
+  if (name.includes("rubeena")) return "support";
   return "service";
 }
 
 export const DESK_LABEL: Record<Desk, string> = {
   aadhaar: "Aadhaar desk",
   service: "Service desk",
-  new: "New joinee",
+  support: "Support desk",
 };
 
 export type NoteTone = "good" | "warn" | "ink";
@@ -348,11 +432,11 @@ export function monthNote(
 
   let honour: NoteHonour = "soon";
   let sentence: string;
-  if (desk === "new" && peers.length < 2) {
+  if (peers.length < 2) {
     honour = "own";
     sentence = growth
-      ? "You are compared only with your own last month, not with the Aadhaar desk or the service desk."
-      : "This month is your base. From next month the note compares you with yourself, not with the senior desks.";
+      ? "You are compared only with your own last month."
+      : "This month is your base. From next month the note compares you with yourself.";
   } else if (share == null) {
     sentence = "Once this desk has counter charges, this note shows your share of that desk only.";
   } else if (share >= 55) {
@@ -414,6 +498,7 @@ export type CentreSnapshot = {
   lastYearPartial: boolean;
   growth: number | null;
   growthPct: number | null;
+  selfExpense: number;
 };
 
 export function centreSnapshot(
@@ -428,6 +513,8 @@ export function centreSnapshot(
   deductLwp: boolean,
   asOf = "",
   payouts: CentrePayout[] = [],
+  salaryPaid: SalaryPaid[] = [],
+  expenseLines: ExpenseLine[] = [],
 ): CentreSnapshot {
   const collection = monthCollection(days, month);
   const rows = staffMonthRows(
@@ -440,8 +527,10 @@ export function centreSnapshot(
     collection,
     deductLwp,
     asOf,
+    salaryPaid,
   );
-  const expense = expenseTotal(expenses, month) + payoutTotal(payouts, month);
+  const selfExpense = expenseLineTotal(expenseLines, month, "self") + payoutTotal(payouts, month, "personal");
+  const expense = expenseTotal(expenses, month) + payoutTotal(payouts, month) + expenseLineTotal(expenseLines, month, "cost");
   const basicPay = rows.reduce((sum, row) => sum + row.pay.basicPayable, 0);
   const incentivePay = rows.reduce((sum, row) => sum + row.pay.incentive, 0);
   const salary = basicPay + incentivePay;
@@ -468,5 +557,6 @@ export function centreSnapshot(
     lastYearPartial: prior.partial,
     growth: growth.diff,
     growthPct: growth.pct,
+    selfExpense,
   };
 }

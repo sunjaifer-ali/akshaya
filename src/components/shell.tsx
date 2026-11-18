@@ -15,6 +15,7 @@ import {
   Download,
   Menu,
   Receipt,
+  FileText,
   Settings,
   Users,
   Wallet,
@@ -27,10 +28,10 @@ import { BackupDialog } from "@/components/backup-dialog";
 import { CentreCredit } from "@/components/centre-credit";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/cn";
-import { authEnabled, deskIsOpen, signOut } from "@/lib/auth/client";
+import { authEnabled, signOut, watchIdle } from "@/lib/auth/client";
 import { RedirectToSignIn, UserButton } from "@/lib/auth/gates";
 import { useCurrentUserState } from "@/lib/auth/use-current-user";
-import { myRole, recordLogin, type CentreRole } from "@/lib/centre.functions";
+import { myRole, listNotices, recordLogin, type CentreRole } from "@/lib/centre.functions";
 import { hydrateLedger, useLedger } from "@/lib/ledger/store";
 import { pullSharedCloses, sharedBookMissing, startSharing, watchAdminBook } from "@/lib/ledger/share";
 import { useMounted } from "@/lib/use-mounted";
@@ -38,7 +39,7 @@ import { useMounted } from "@/lib/use-mounted";
 const NAV = [
   { to: "/", label: "Desk", icon: BookOpen, group: "Today", mobile: true },
   { to: "/counter", label: "Counter", icon: PenLine, group: "Today", mobile: true },
-  { to: "/gpay", label: "GPay", icon: Smartphone, group: "Today", mobile: false },
+  { to: "/gpay", label: "Personal GPay", icon: Smartphone, group: "Today", mobile: false },
   { to: "/payments", label: "Payments", icon: Banknote, group: "Today", mobile: true },
   { to: "/closing", label: "Closing", icon: Calculator, group: "Today", mobile: true },
   { to: "/credit", label: "Credit and advances", icon: ArrowLeftRight, group: "Today", mobile: true },
@@ -50,7 +51,8 @@ const NAV = [
   { to: "/leave", label: "Leave", icon: CalendarDays, group: "People", mobile: false },
   { to: "/centre", label: "Centre", icon: BarChart3, group: "Review", mobile: false },
   { to: "/reports", label: "Reports", icon: ClipboardList, group: "Review", mobile: false },
-  { to: "/note", label: "Note", icon: NotebookPen, group: "Review", mobile: false },
+  { to: "/note", label: "Message", icon: NotebookPen, group: "Review", mobile: false },
+  { to: "/bill", label: "Bill generation", icon: FileText, group: "Today", mobile: false },
 ] as const;
 
 const GROUPS = ["Today", "Money", "People", "Review"] as const;
@@ -58,24 +60,24 @@ const GROUPS = ["Today", "Money", "People", "Review"] as const;
 const MORE_LABEL: Record<(typeof NAV)[number]["to"], string> = {
   "/": "Desk",
   "/counter": "Live counter",
-  "/gpay": "Personal GPay",
+  "/bill": "Bill generation",
+  "/gpay": "Personal GPay Payments",
   "/payments": "Payments",
   "/credit": "Credit and advances",
   "/diary": "Diary",
-  "/note": "Month note",
+  "/note": "Message",
   "/collections": "Collections",
   "/closing": "Daily closing",
   "/salary": "Salary",
   "/expenses": "Expenses",
   "/centre": "Centre performance",
-  "/reports": "Consolidated reports",
+  "/reports": "Reports",
   "/staff": "Staff report",
   "/leave": "Leave register",
 };
 
 export function Shell({ children }: { children: ReactNode }) {
   const pathname = useRouterState({ select: (state) => state.location.pathname });
-  const centreName = useLedger((state) => state.centreName);
   const sample = useLedger((state) => state.sample);
   const sampleBanner = useLedger((state) => state.sampleBanner);
   const dismissSample = useLedger((state) => state.dismissSample);
@@ -90,19 +92,21 @@ export function Shell({ children }: { children: ReactNode }) {
   const userId = user?.id ?? "";
   const [role, setRole] = useState<CentreRole | null | "loading">(authEnabled ? "loading" : "admin");
   const [blocked, setBlocked] = useState("");
+  const [unreadMessages, setUnreadMessages] = useState(0);
 
   useEffect(() => {
     hydrateLedger();
   }, []);
 
   useEffect(() => {
-    if (!authEnabled || !mounted || pathname === "/login" || deskIsOpen()) return;
-    window.location.replace("/login");
-    void signOut("/login").catch(() => undefined);
-  }, [mounted, pathname]);
+    if (!authEnabled || !userId || pathname === "/login") return;
+    return watchIdle(() => {
+      void signOut("/login").catch(() => undefined);
+    });
+  }, [userId, pathname]);
 
   useEffect(() => {
-    if (!authEnabled || !mounted || isPending || !userId || !deskIsOpen()) return;
+    if (!authEnabled || !mounted || isPending || !userId) return;
     let stop = () => {};
     let cancelled = false;
     const timer = window.setTimeout(() => {
@@ -158,7 +162,23 @@ export function Shell({ children }: { children: ReactNode }) {
     return pullSharedCloses();
   }, 20000, [role, pathname]);
 
+  useEffect(() => {
+    const clear = () => setUnreadMessages(0);
+    window.addEventListener("messages-seen", clear);
+    return () => window.removeEventListener("messages-seen", clear);
+  }, []);
+
+  useRefresh(() => {
+    if (role !== "employee") return;
+    return listNotices()
+      .then((book) => setUnreadMessages(book.unread))
+      .catch(() => undefined);
+  }, 15000, [role, pathname]);
+
   if (pathname === "/login") return <>{children}</>;
+
+  const staffPath = pathname === "/counter" || pathname === "/bill" || pathname === "/credit" || pathname === "/note" || pathname === "/payments" || pathname === "/diary" || pathname === "/gpay";
+  const closerPath = pathname === "/closing" || pathname === "/counter";
 
   if (authEnabled && (!mounted || isPending || (user && role === "loading"))) {
     return <p className="grid min-h-dvh place-items-center text-sm text-muted">Opening the book…</p>;
@@ -182,15 +202,19 @@ export function Shell({ children }: { children: ReactNode }) {
     );
   }
 
-  if (role === "employee" && pathname !== "/counter" && pathname !== "/credit" && pathname !== "/note" && pathname !== "/payments" && pathname !== "/diary" && pathname !== "/gpay") return <Navigate to="/counter" />;
-  if (role === "closer" && pathname !== "/closing" && pathname !== "/counter") return <Navigate to="/closing" />;
+  if (role === "employee" && !staffPath) return <Navigate to="/counter" />;
+  if (role === "closer" && !closerPath) return <Navigate to="/closing" />;
 
   const links =
     role === "employee"
-      ? NAV.filter((item) => item.to === "/counter" || item.to === "/payments" || item.to === "/credit" || item.to === "/diary" || item.to === "/note" || item.to === "/gpay")
+      ? [
+          ...NAV.filter((item) => item.to === "/counter" || item.to === "/payments" || item.to === "/diary" || item.to === "/note"),
+          ...NAV.filter((item) => item.to === "/gpay"),
+          ...NAV.filter((item) => item.to === "/bill"),
+        ]
       : role === "closer"
         ? NAV.filter((item) => item.to === "/counter" || item.to === "/closing")
-        : NAV.filter((item) => item.to !== "/payments");
+        : NAV.filter((item) => item.to !== "/payments" && item.to !== "/bill");
 
   return (
     <div className="min-h-dvh bg-bg text-ink">
@@ -198,16 +222,17 @@ export function Shell({ children }: { children: ReactNode }) {
         <Link
           to={role === "employee" ? "/counter" : role === "closer" ? "/closing" : "/"}
           aria-label={role === "employee" ? "Counter" : role === "closer" ? "Closing" : "Desk"}
-          className="block shrink-0 border-b border-line px-4 pb-4 pt-5 text-center"
+          className="block shrink-0 border-b border-line bg-accent-soft px-4 pb-4 pt-5 text-center"
         >
-          <img src="/akshaya-logo.png" alt="" className="mx-auto h-auto w-16" />
-          <p className="mt-2 font-display text-2xl leading-none text-ink">Thrikkadeeri</p>
-          <p className="mt-1 text-xs tracking-wide text-faint">Centre book</p>
+          <img src="/akshaya-logo.png" alt="" width="64" height="51" className="mx-auto h-auto w-16" />
+          <p className="mt-2 font-display text-2xl leading-none text-accent">Akshaya</p>
+          <p className="mt-1 text-sm text-muted">Thrikkadeeri</p>
+          {role === "employee" && user?.displayName ? <p className="mt-2 text-sm font-medium text-accent">{user.displayName}</p> : null}
         </Link>
         <nav className="flex min-h-0 flex-1 flex-col overflow-y-auto px-3 py-3">
           {role === "employee" ? (
             links.map((item) => (
-              <NavLink key={item.to} to={item.to} label={item.label} icon={item.icon} active={isActive(pathname, item.to)} />
+              <NavLink key={item.to} to={item.to} label={item.label} icon={item.icon} active={isActive(pathname, item.to)} badge={item.to === "/note" ? unreadMessages : 0} />
             ))
           ) : (
             GROUPS.map((group) => {
@@ -217,7 +242,7 @@ export function Shell({ children }: { children: ReactNode }) {
                 <div key={group} className="mb-3 last:mb-0">
                   <p className="px-3 pb-1 text-[10px] font-semibold tracking-[0.16em] text-faint">{group.toUpperCase()}</p>
                   {items.map((item) => (
-                    <NavLink key={item.to} to={item.to} label={item.label} icon={item.icon} active={isActive(pathname, item.to)} />
+                    <NavLink key={item.to} to={item.to} label={item.label} icon={item.icon} active={isActive(pathname, item.to)} badge={item.to === "/note" ? unreadMessages : 0} />
                   ))}
                 </div>
               );
@@ -227,7 +252,7 @@ export function Shell({ children }: { children: ReactNode }) {
         <div className="grid shrink-0 gap-1 border-t border-line bg-surface p-3">
           {role === "employee" || role === "closer" ? (
             <Button variant="ghost" className="w-full justify-start" onClick={() => setPasswordOpen(true)}>
-              Password
+              Change password
             </Button>
           ) : null}
           <UserButton hideSignOut />
@@ -259,12 +284,12 @@ export function Shell({ children }: { children: ReactNode }) {
       </aside>
 
       <div className="print-shell md:pl-56">
-        <header className="no-print sticky top-0 z-20 flex items-center justify-between gap-3 border-b border-line bg-bg/95 px-4 py-3 backdrop-blur md:hidden">
+        <header className="no-print sticky top-0 z-20 flex items-center justify-between gap-3 border-b border-line bg-surface/95 px-4 py-3 shadow-sm backdrop-blur md:hidden">
           <Link to={role === "employee" ? "/counter" : role === "closer" ? "/closing" : "/"} aria-label={role === "employee" ? "Counter" : role === "closer" ? "Closing" : "Desk"} className="flex min-w-0 items-center gap-2">
-            <img src="/akshaya-logo.png" alt="" className="h-9 w-auto shrink-0" />
+            <img src="/akshaya-logo.png" alt="" width="36" height="29" className="h-9 w-auto shrink-0" />
             <div className="min-w-0">
-              <p className="text-xs font-semibold tracking-widest text-accent">AKSHAYA</p>
-              <p className="truncate font-display text-lg leading-none">{shortName(centreName)}</p>
+              <p className="truncate font-display text-lg leading-none text-accent">Akshaya</p>
+              <p className="text-sm text-muted">Thrikkadeeri</p>
             </div>
           </Link>
           {role === "admin" ? (
@@ -282,7 +307,7 @@ export function Shell({ children }: { children: ReactNode }) {
           ) : (
             <div className="flex items-center gap-2">
               <Button variant="secondary" size="sm" onClick={() => setPasswordOpen(true)}>
-                Password
+                Change password
               </Button>
               <UserButton />
             </div>
@@ -310,12 +335,17 @@ export function Shell({ children }: { children: ReactNode }) {
               </div>
             </div>
           ) : null}
+          {children && role === "employee" && unreadMessages > 0 && pathname !== "/note" ? (
+            <Link to="/note" className="no-print mb-4 block rounded-lg border border-accent bg-accent-soft px-4 py-3 text-sm font-medium text-accent">
+              Message received
+            </Link>
+          ) : null}
           {children}
         </main>
       </div>
 
       <nav className="no-print safe-bottom fixed inset-x-0 bottom-0 z-30 border-t border-line bg-surface md:hidden">
-        <div className={cn("grid", role === "closer" ? "grid-cols-2" : "grid-cols-5")}>
+        <div className={cn("grid", role === "closer" ? "grid-cols-2" : role === "employee" ? "grid-cols-6" : "grid-cols-5")}>
           {(role === "admin" ? links.filter((item) => item.mobile) : links).map((item) => (
             <Link
               key={item.to}
@@ -327,7 +357,8 @@ export function Shell({ children }: { children: ReactNode }) {
               )}
             >
               <item.icon className="size-4" />
-              {item.label === "Collections" ? "Cash" : item.label}
+              {item.label === "Collections" ? "Cash" : item.label === "Personal GPay" ? "GPay" : item.label}
+              {item.to === "/note" && unreadMessages > 0 ? <span className="text-[10px] font-medium text-accent">New</span> : null}
             </Link>
           ))}
           {role === "admin" ? (
@@ -349,23 +380,23 @@ export function Shell({ children }: { children: ReactNode }) {
       {more ? (
         <div className="no-print fixed inset-0 z-40 md:hidden">
           <button type="button" className="absolute inset-0 bg-ink/30" aria-label="Close menu" onClick={() => setMore(false)} />
-          <div className="safe-bottom absolute inset-x-0 bottom-0 rounded-t-xl border border-line bg-surface p-4">
-            <p className="mb-2 text-xs font-semibold tracking-widest text-faint">MORE</p>
-            <div className="grid gap-3">
+          <div className="safe-bottom absolute inset-x-0 bottom-0 max-h-[85dvh] overflow-y-auto rounded-t-xl border border-line bg-surface p-4">
+            <p className="mb-3 text-base font-semibold text-accent">More</p>
+            <div className="grid gap-4">
               {GROUPS.map((group) => {
                 const items = NAV.filter((item) => !item.mobile && item.group === group);
                 if (items.length === 0) return null;
                 return (
                   <div key={group}>
-                    <p className="px-2 pb-1 text-[10px] font-semibold tracking-[0.16em] text-faint">{group.toUpperCase()}</p>
+                    <p className="px-3 pb-1 text-sm font-semibold text-accent">{group}</p>
                     {items.map((item) => (
                       <Link
                         key={item.to}
                         to={item.to}
                         onClick={() => setMore(false)}
-                        className="flex min-h-11 items-center gap-3 rounded-md px-2 text-sm hover:bg-surface-2"
+                        className="flex min-h-14 items-center gap-3 rounded-md px-3 text-base font-medium hover:bg-surface-2"
                       >
-                        <item.icon className="size-4 text-accent" />
+                        <item.icon className="size-5 text-accent" />
                         {MORE_LABEL[item.to]}
                       </Link>
                     ))}
@@ -389,22 +420,25 @@ function NavLink({
   label,
   icon: Icon,
   active,
+  badge = 0,
 }: {
   to: (typeof NAV)[number]["to"];
   label: string;
   icon: (typeof NAV)[number]["icon"];
   active: boolean;
+  badge?: number;
 }) {
   return (
     <Link
       to={to}
       className={cn(
-        "flex min-h-9 items-center gap-3 rounded-md px-3 text-sm",
-        active ? "bg-accent-soft font-medium text-accent" : "text-ink hover:bg-surface-2",
+        "flex min-h-10 items-center gap-3 rounded-md px-3 text-sm",
+        active ? "bg-accent font-medium text-accent-ink" : "text-ink hover:bg-surface-2",
       )}
     >
-      <Icon className={cn("size-4", active ? "text-accent" : "text-muted")} />
-      {label}
+      <Icon className={cn("size-4", active ? "text-accent-ink" : "text-muted")} />
+      <span className="min-w-0 flex-1">{label}</span>
+      {badge > 0 ? <span className={cn("rounded-full px-2 py-0.5 text-[10px] font-medium", active ? "bg-white text-accent" : "bg-accent text-accent-ink")}>New</span> : null}
     </Link>
   );
 }
@@ -412,8 +446,4 @@ function NavLink({
 function isActive(pathname: string, to: string): boolean {
   if (to === "/") return pathname === "/";
   return pathname === to || pathname.startsWith(`${to}/`);
-}
-
-function shortName(name: string): string {
-  return name.replace(/^Akshaya Centre\s+/i, "") || name;
 }

@@ -1,84 +1,87 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
-import { MonthBar } from "@/components/month-bar";
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import { ResultDialog, type Result } from "@/components/result-dialog";
-import { personalGpayMonth, type GpayLine } from "@/lib/centre.functions";
+import { personalGpaySpan, type GpayLine } from "@/lib/centre.functions";
 import { useRefresh } from "@/lib/use-refresh";
 import { downloadWorkbook } from "@/lib/excel";
 import { inr } from "@/lib/format";
-import { formatDay, formatMonth } from "@/lib/ledger/dates";
-import { readMonth } from "@/lib/search";
-import { useResolvedMonth } from "@/lib/use-today";
+import { formatDay } from "@/lib/ledger/dates";
+import { useTodayKey } from "@/lib/use-today";
 
 export const Route = createFileRoute("/gpay")({
-  validateSearch: readMonth,
   component: GpayPage,
 });
 
 function GpayPage() {
-  const search = Route.useSearch();
-  const navigate = Route.useNavigate();
-  const month = useResolvedMonth(search.m ?? "");
+  const today = useTodayKey();
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
+  const [role, setRole] = useState<"admin" | "employee">("employee");
   const [lines, setLines] = useState<GpayLine[]>([]);
   const [notice, setNotice] = useState("");
   const [downloading, setDownloading] = useState(false);
   const [result, setResult] = useState<Result | null>(null);
+  const start = from || today;
+  const end = to || today;
   const service = lines.reduce((sum, line) => sum + line.amount, 0);
   const department = lines.reduce((sum, line) => sum + line.department, 0);
 
   useRefresh(() => {
-    return personalGpayMonth({ data: month })
-      .then((book) => setLines(book.lines))
+    if (!start || !end) return;
+    return personalGpaySpan({ data: { from: start, to: end } })
+      .then((book) => {
+        setRole(book.role === "admin" ? "admin" : "employee");
+        setLines(book.lines);
+      })
       .catch((error: unknown) => setNotice(error instanceof Error ? error.message : "Personal GPay did not open."));
-  }, 15000, [month]);
+  }, 15000, [start, end]);
 
   return (
     <div>
       <PageHeader
-        kicker="GPAY"
-        title="Personal GPay"
+        kicker="PAYMENTS"
+        title="Personal GPay Payments"
         actions={
-          <div className="flex flex-wrap items-center gap-2">
-            <Button
-              variant="secondary"
-              disabled={downloading || lines.length === 0}
-              onClick={() => {
-                setDownloading(true);
-                void downloadWorkbook(`Personal-GPay-${month}.xlsx`, [
-                  {
-                    name: "Personal GPay",
-                    rows: [
-                      ["Date", "Customer", "Mobile", "Staff", "Service", "Service charge", "Department", "Total"],
-                      ...lines.map((line) => [line.date, line.customer, line.mobile, line.staff, line.service, line.amount, line.department, line.amount + line.department]),
-                    ],
-                  },
-                ])
-                  .then(() => setResult({ ok: true, message: "Personal GPay downloaded." }))
-                  .catch((error: unknown) => setResult({ ok: false, message: error instanceof Error ? error.message : "The file was not downloaded." }))
-                  .finally(() => setDownloading(false));
-              }}
-            >
-              {downloading ? "Downloading…" : "Download"}
-            </Button>
-            <MonthBar
-              month={month}
-              onChange={(next) => {
-                void navigate({ search: { m: next } });
-              }}
-            />
-          </div>
+          role === "admin" ? (
+            <div className="flex flex-wrap items-center gap-2">
+              <input type="date" aria-label="From" className="h-11 rounded-sm border border-line bg-bg px-3 text-base" value={start} onChange={(event) => setFrom(event.target.value)} />
+              <input type="date" aria-label="To" className="h-11 rounded-sm border border-line bg-bg px-3 text-base" value={end} onChange={(event) => setTo(event.target.value)} />
+              <Button
+                variant="secondary"
+                disabled={downloading || lines.length === 0}
+                onClick={() => {
+                  setDownloading(true);
+                  void downloadWorkbook(`Personal-GPay-${start}-to-${end}.xlsx`, [
+                    {
+                      name: "Personal GPay",
+                      rows: [
+                        ["Date", "Customer", "Mobile", "Staff", "Service", "Service charge", "Department", "Total"],
+                        ...lines.map((line) => [line.date, line.customer, line.mobile, line.staff, line.service, line.amount, line.department, line.amount + line.department]),
+                      ],
+                    },
+                  ])
+                    .then(() => setResult({ ok: true, message: "Personal GPay downloaded." }))
+                    .catch((error: unknown) => setResult({ ok: false, message: error instanceof Error ? error.message : "The file was not downloaded." }))
+                    .finally(() => setDownloading(false));
+                }}
+              >
+                {downloading ? "Downloading…" : "Download"}
+              </Button>
+            </div>
+          ) : null
         }
       />
       <section className="grid gap-3 sm:grid-cols-3">
         <Figure label="Service charge" value={inr(service)} />
         <Figure label="Department" value={inr(department)} />
-        <Figure label="On your phone" value={inr(service + department)} />
+        <Figure label="On the phone" value={inr(service + department)} />
       </section>
+      <p className="mt-3 text-sm text-muted">{role === "admin" ? `${formatDay(start)} to ${formatDay(end)}` : "Today only"}</p>
       <section className="mt-4 overflow-x-auto rounded-xl border border-line bg-surface">
         {notice ? <p className="px-4 py-3 text-sm text-bad">{notice}</p> : null}
-        {lines.length === 0 ? <p className="px-4 py-6 text-sm text-muted">No personal GPay in {formatMonth(month)}.</p> : null}
+        {lines.length === 0 ? <p className="px-4 py-6 text-sm text-muted">No personal GPay in this period.</p> : null}
         {lines.length > 0 ? (
           <table className="w-full min-w-[40rem] text-sm">
             <thead>

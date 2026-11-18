@@ -195,6 +195,8 @@ export function buildSample(): LedgerData {
     perfOverrides: [],
     lyOverrides: {},
     cashCloses: [],
+    salaryPaid: [],
+    expenseLines: [],
   };
 }
 
@@ -213,15 +215,17 @@ export function emptyBook(centreName: string): LedgerData {
     perfOverrides: [],
     lyOverrides: {},
     cashCloses: [],
+    salaryPaid: [],
+    expenseLines: [],
   };
 }
 
 const CENTRE_STAFF: Employee[] = [
-  { id: "ajitha", name: "Ajitha", role: "Aadhaar", basic: 15000, incentive: 0, active: true },
-  { id: "haseena", name: "Haseena", role: "Aadhaar", basic: 16500, incentive: 0, active: true },
-  { id: "sajini", name: "Sajini", role: "Service", basic: 12000, incentive: 0, active: true },
-  { id: "sheena", name: "Sheena", role: "Service", basic: 12500, incentive: 0, active: true },
-  { id: "rubeena", name: "Rubeena", role: "New joinee", basic: 10000, incentive: 0, active: true },
+  { id: "ajitha", name: "Ajitha", role: "Aadhaar desk", desk: "aadhaar", basic: 15000, incentive: 0, active: true },
+  { id: "haseena", name: "Haseena", role: "Aadhaar desk", desk: "aadhaar", basic: 16500, incentive: 0, active: true },
+  { id: "sajini", name: "Sajini", role: "Service desk", desk: "service", basic: 12000, incentive: 0, active: true },
+  { id: "sheena", name: "Sheena", role: "Service desk", desk: "service", basic: 12500, incentive: 0, active: true },
+  { id: "rubeena", name: "Rubeena", role: "Support desk", desk: "support", basic: 10000, incentive: 0, active: true },
 ];
 
 // Usual mix from the expense calculator. Monthly totals are scaled to this mix
@@ -423,5 +427,7 @@ export function buildCentreBook(): LedgerData {
     perfOverrides: [],
     lyOverrides: { ...LAST_YEAR },
     cashCloses: [],
+    salaryPaid: [],
+    expenseLines: [],
   };
 }

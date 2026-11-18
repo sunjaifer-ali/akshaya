@@ -1,17 +1,17 @@
 @import "tailwindcss";
 
 @theme {
-  --color-bg: #f3f1ec;
-  --color-surface: #fbfaf7;
-  --color-surface-2: #eeece6;
-  --color-ink: #1c1b19;
-  --color-muted: #5c574f;
-  --color-faint: #847e74;
-  --color-line: #e3ddd3;
-  --color-line-strong: #d0c9bc;
-  --color-accent: #1e6b43;
-  --color-accent-ink: #f7f6f3;
-  --color-accent-soft: #e4f0e9;
+  --color-bg: #d4e7f6;
+  --color-surface: #ffffff;
+  --color-surface-2: #e7f3fb;
+  --color-ink: #0d2748;
+  --color-muted: #3a5570;
+  --color-faint: #5a728c;
+  --color-line: #c5d9ec;
+  --color-line-strong: #8aafd0;
+  --color-accent: #154a96;
+  --color-accent-ink: #f7fbff;
+  --color-accent-soft: #d7e9f8;
   --color-warn: #8a5a12;
   --color-warn-soft: #f6edd9;
   --color-bad: #8d3a32;
@@ -44,7 +44,10 @@
   body {
     margin: 0;
     min-height: 100dvh;
-    background: var(--color-bg);
+    background:
+      radial-gradient(720px 280px at 100% -40px, #9ec4e8 0%, transparent 55%),
+      radial-gradient(640px 320px at -10% 0%, #ffffff 0%, transparent 50%),
+      var(--color-bg);
     color: var(--color-ink);
     font-family: var(--font-sans);
     font-size: 1rem;
@@ -70,6 +73,13 @@
   select,
   textarea {
     font: inherit;
+    background-color: #fff;
+  }
+
+  input:focus,
+  select:focus,
+  textarea:focus {
+    box-shadow: 0 0 0 3px color-mix(in oklab, var(--color-accent) 16%, transparent);
   }
 }
 
@@ -77,8 +87,15 @@
   padding-bottom: env(safe-area-inset-bottom);
 }
 
-.bg-surface.rounded-xl {
-  box-shadow: 0 1px 2px color-mix(in oklab, var(--color-ink) 4%, transparent);
+.bg-surface.rounded-xl,
+.bg-surface.rounded-lg {
+  box-shadow: 0 6px 16px color-mix(in oklab, #154a96 7%, transparent);
+}
+
+nav.fixed {
+  background: color-mix(in oklab, white 94%, transparent);
+  backdrop-filter: blur(10px);
+  box-shadow: 0 -6px 18px color-mix(in oklab, #102a4c 8%, transparent);
 }
 
 .modal-panel {
@@ -121,6 +138,19 @@
   margin: 14mm;
 }
 
+@page bill {
+  size: A4 portrait;
+  margin: 8mm;
+}
+
+.bill-sheet {
+  width: min(100%, 190mm);
+  min-height: 120mm;
+  border: 1px solid #111;
+  padding: 8mm;
+  color: #111;
+}
+
 @media print {
   html,
   body,
@@ -130,6 +160,11 @@
     overflow: visible !important;
     height: auto !important;
     min-height: 0 !important;
+  }
+
+  .bg-surface.rounded-xl,
+  .bg-surface.rounded-lg {
+    box-shadow: none !important;
   }
 
   .no-print,
@@ -212,6 +247,37 @@
   .month-note {
     break-after: page;
     page: salary;
+  }
+
+  .bill-sheet {
+    page: bill;
+    width: 190mm;
+    height: 136mm;
+    min-height: 0;
+    margin: 0;
+    break-after: avoid;
+    page-break-after: avoid;
+    break-inside: avoid;
+    box-shadow: none;
+  }
+
+  .bill-sheet table {
+    font-size: 13px !important;
+  }
+
+  .bill-sheet th,
+  .bill-sheet td {
+    padding: 3px 0 !important;
+  }
+
+  .bill-sheet img {
+    height: 48px !important;
+    width: auto !important;
+    margin: 0 !important;
+  }
+
+  main:has(.bill-sheet) > img {
+    display: none !important;
   }
 
   .salary-slip:last-child,

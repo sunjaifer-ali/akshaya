@@ -3,12 +3,13 @@ import { useState } from "react";
 import { Bar, BarChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { MonthBar } from "@/components/month-bar";
 import { PageHeader } from "@/components/page-header";
+import { ChartFrame } from "@/components/chart-frame";
 import { StaffDialog } from "@/components/staff-dialog";
 import { ResultDialog, type Result } from "@/components/result-dialog";
 import { Button } from "@/components/ui/button";
 import { chartColors } from "@/lib/chart-colors";
 import { inr, pct } from "@/lib/format";
-import { centreSnapshot, monthCollection, recordedAttendance, staffMonthRows } from "@/lib/ledger/calc";
+import { centreSnapshot, dayOn, DESK_LABEL, deskOf, monthCollection, recordedAttendance, staffMonthRows } from "@/lib/ledger/calc";
 import { formatMonthShort, fyLabel, fyMonths, fyStartYear, isSunday } from "@/lib/ledger/dates";
 import { useLedger } from "@/lib/ledger/store";
 import { LEAVE_LABEL, type Employee } from "@/lib/ledger/types";
@@ -40,6 +41,7 @@ function StaffPage() {
     centre,
     book.deductLwp,
     today,
+    book.salaryPaid ?? [],
   ).sort((a, b) => b.collection - a.collection);
   const selectedId = rows.some((row) => row.employee.id === search.e) ? (search.e ?? "") : (rows[0]?.employee.id ?? "");
   const selected = rows.find((row) => row.employee.id === selectedId);
@@ -57,6 +59,7 @@ function StaffPage() {
           collection,
           book.deductLwp,
           today,
+          book.salaryPaid ?? [],
         );
         const mine = people.find((person) => person.employee.id === selected.employee.id);
         return {
@@ -85,12 +88,16 @@ function StaffPage() {
       row.month,
       book.deductLwp,
       today,
+      book.payouts ?? [],
+      book.salaryPaid ?? [],
+      book.expenseLines ?? [],
     );
     return sum + snap.collection;
   }, 0);
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<Employee | null>(null);
   const [result, setResult] = useState<Result | null>(null);
+  const [day, setDay] = useState(today || "");
   const left = book.employees.filter((employee) => !employee.active && !rows.some((row) => row.employee.id === employee.id));
 
   return (
@@ -114,6 +121,7 @@ function StaffPage() {
                 void navigate({ search: { m: next, e: selectedId } });
               }}
             />
+            <input type="date" aria-label="Staff date" className="h-11 rounded-sm border border-line bg-bg px-3 text-base" value={day || today} onChange={(event) => setDay(event.target.value)} />
           </div>
         }
       />
@@ -151,7 +159,7 @@ function StaffPage() {
                     <td className="px-3 py-3">
                       <span className="font-medium">{row.employee.name}</span>
                       <span className="mt-0.5 block text-xs text-faint">
-                        {row.employee.role}
+                        {DESK_LABEL[deskOf(row.employee)]}
                         {row.employee.active ? "" : " · Inactive"}
                       </span>
                     </td>
@@ -214,14 +222,16 @@ function StaffPage() {
                 </div>
               </div>
               <div className="mt-4 grid gap-3 sm:grid-cols-4">
+                <Mini label="That day" value={inr(dayOn(book.days, day || today)?.splits[selected.employee.id] ?? 0)} />
                 <Mini label="Year collection" value={inr(ytdCollection)} />
                 <Mini label="Year salary" value={inr(ytdPay)} />
                 <Mini label="Pay % of their work" value={ytdCollection > 0 ? pct((ytdPay / ytdCollection) * 100) : "—"} />
                 <Mini label="Share of centre" value={centreYear > 0 ? pct((ytdCollection / centreYear) * 100) : "—"} />
               </div>
-              <div className="print-chart mt-4 h-56">
+              <div className="print-chart mt-4 h-56 min-w-0">
                 {mounted ? (
-                  <ResponsiveContainer width="100%" height="100%">
+                  <ChartFrame>
+                  <ResponsiveContainer width="100%" height="100%" minWidth={0}>
                     <BarChart data={yearVisible}>
                       <XAxis dataKey="label" tick={{ fill: chartColors.faint, fontSize: 12 }} axisLine={false} tickLine={false} />
                       <YAxis hide />
@@ -232,6 +242,7 @@ function StaffPage() {
                       <Bar dataKey="collection" fill={chartColors.accent} radius={[4, 4, 0, 0]} />
                     </BarChart>
                   </ResponsiveContainer>
+                  </ChartFrame>
                 ) : null}
               </div>
             </section>
@@ -246,7 +257,7 @@ function StaffPage() {
               <li key={employee.id} className="flex items-center justify-between gap-3 py-2 text-sm">
                 <span>
                   {employee.name}
-                  <span className="mt-0.5 block text-xs text-faint">{employee.role}</span>
+                  <span className="mt-0.5 block text-xs text-faint">{DESK_LABEL[deskOf(employee)]}</span>
                 </span>
                 <Button size="sm" variant="secondary" onClick={() => book.setEmployeeActive(employee.id, true)}>
                   Activate
