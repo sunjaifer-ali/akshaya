@@ -131,7 +131,7 @@ function closeBase(row: CashClose): number {
 export function previousClose(rows: CashClose[], date: string): CashClose | null {
   let best: CashClose | null = null;
   for (const row of rows) {
-    if (row.date < date && countStarted(row) && (!best || row.date > best.date)) best = row;
+    if (row.date < date && countStarted(row) && !row.draft && (!best || row.date > best.date)) best = row;
   }
   return best;
 }
@@ -185,6 +185,8 @@ export type CloseCheck = {
   advanceServed: number;
   advanceIn: number;
   cashIn: number;
+  creditGiven: number;
+  creditPaid: number;
   profitTaken: number;
   paidOut: number;
   receipts: number;
@@ -229,7 +231,7 @@ export function checkClose(
   const last = previousClose(closes, row.date);
   const gap = closeGap(row, last);
   const idle = idleBook();
-  const empty = { last: null as number | null, lastDate: "", movement: null as number | null, collected: null as number | null, personalGpay: 0, departmentGpay: 0, bankDepartment: 0, paidOut: 0, receipts: 0, payments: 0, serviceEarned: 0, income: 0, cashBook: idle, centreBook: idle, personalBook: idle, walletBook: idle, ...gap, advanceChange: 0, advanceServed: 0, advanceIn: 0, cashIn: 0, missing: [] as string[], difference: null as number | null, unfixed: null as number | null };
+  const empty = { last: null as number | null, lastDate: "", movement: null as number | null, collected: null as number | null, personalGpay: 0, departmentGpay: 0, bankDepartment: 0, paidOut: 0, receipts: 0, payments: 0, serviceEarned: 0, income: 0, cashBook: idle, centreBook: idle, personalBook: idle, walletBook: idle, ...gap, advanceChange: 0, advanceServed: 0, advanceIn: 0, cashIn: 0, creditGiven: 0, creditPaid: 0, missing: [] as string[], difference: null as number | null, unfixed: null as number | null };
   if (!last) return empty;
   const span = spanDates(last.date, row.date);
   const counterDay = (date: string) => {
@@ -245,23 +247,19 @@ export function checkClose(
   const base = { personalGpay, departmentGpay, bankDepartment, paidOut, ...gap };
   const opening = closeBase(last);
   const movement = closeBase(row) - opening;
-  if (!countStarted(row) && !row.accepted) {
-    return { ...empty, last: opening, lastDate: last.date, collected: missing.length > 0 ? null : known, ...base, missing };
-  }
-  if (missing.length > 0) {
-    return { ...empty, last: opening, lastDate: last.date, movement, ...base, missing };
-  }
-  // Credit given, a repayment, an advance received, and a service from that advance
-  // belong only to their own date. They are not added again on later days.
+  // These belong to their own date. Show them before the balances are typed, and use the same figures in the sum.
   const creditGiven = movementInSpan(closes, row, last.date, creditGivenTotal);
   const creditPaid = movementInSpan(closes, row, last.date, creditPaidTotal);
   const advanceIn = movementInSpan(closes, row, last.date, (item) => Math.max(0, item.advanceIn ?? 0));
   const advanceServed = movementInSpan(closes, row, last.date, (item) => item.advanceServed ?? 0);
   const transfer = row.profitTaken ?? 0;
   const cashIn = Math.max(0, Math.round(row.cashIn ?? 0));
-  // A Personal GPay payment lands entirely in the personal account. None of it is expected
-  // in the centre cash, wallets, or bank. The service-charge part is inside the counter
-  // total, so it comes out with the department part that has already left the centre bank.
+  if (!countStarted(row) && !row.accepted) {
+    return { ...empty, last: opening, lastDate: last.date, collected: missing.length > 0 ? null : known, ...base, advanceIn, advanceServed, cashIn, creditGiven, creditPaid, missing };
+  }
+  if (missing.length > 0) {
+    return { ...empty, last: opening, lastDate: last.date, movement, ...base, advanceIn, advanceServed, cashIn, creditGiven, creditPaid, missing };
+  }
   const personalWhole = personalGpay + departmentGpay;
   const centreService = Math.max(0, known - personalGpay);
   const departmentOut = departmentGpay + bankDepartment;
@@ -287,6 +285,8 @@ export function checkClose(
     advanceIn,
     advanceServed,
     cashIn,
+    creditGiven,
+    creditPaid,
     missing: [],
     difference,
     unfixed: unfixedAmount(difference, row.fixed),
@@ -319,6 +319,7 @@ export function accountLines(
   return [...closes]
     .sort((a, b) => (a.date < b.date ? -1 : 1))
     .flatMap((row) => {
+      if (row.draft) return [];
       const check = checkClose(row, closes, days, holidays, payouts);
       if (check.difference == null || check.unfixed == null || check.difference === 0) return [];
       return [{ date: row.date, difference: check.difference, unfixed: check.unfixed }];

@@ -71,7 +71,7 @@ function CounterPage() {
       .catch((error: unknown) => {
         if (seq === seen.current) setNotice(error instanceof Error ? error.message : "The counter did not open.");
       });
-  }, 15000, [day]);
+  }, 30000, [day]);
 
   const save = () => {
     setPending(true);
@@ -602,7 +602,7 @@ function CounterCredit({ month, onResult }: { month: string; onResult: (result: 
       })
       .catch((error: unknown) => onResult({ ok: false, message: error instanceof Error ? error.message : "Credit did not open." }));
   };
-  useRefresh(load, 15000, [month]);
+  useRefresh(load, 60000, [month]);
 
   return (
     <>
@@ -611,20 +611,20 @@ function CounterCredit({ month, onResult }: { month: string; onResult: (result: 
         {open.length === 0 ? <p className="mt-3 text-sm text-muted">No open credit.</p> : null}
         <ul className="mt-2 divide-y divide-line">
           {open.map((line) => (
-            <li key={`${line.customer}-${line.mobile}`} className="py-3 text-sm">
+            <li key={`${line.customer}-${line.mobile}-${line.date}-${line.balance}`} className="py-3 text-sm">
               <div className="flex items-center justify-between gap-3">
                 <span>
                   {line.customer}
                   <span className="mt-0.5 block text-xs text-faint">{line.mobile || "No mobile"} · {inr(line.balance)}</span>
                 </span>
-                <Button size="sm" variant="secondary" onClick={() => setPayFor(payFor === line.customer ? "" : line.customer)}>Receive</Button>
+                <Button size="sm" variant="secondary" onClick={() => setPayFor(payFor === `${line.customer}|${line.date}` ? "" : `${line.customer}|${line.date}`)}>Receive</Button>
               </div>
-              {payFor === line.customer ? (
+              {payFor === `${line.customer}|${line.date}` ? (
                 <form
                   className="mt-2 flex gap-2"
                   onSubmit={(event) => {
                     event.preventDefault();
-                    void addCustomerMove({ data: { kind: "debit", customer: line.customer, mobile: line.mobile, amount: Number(payAmount) } })
+                    void addCustomerMove({ data: { kind: "debit", customer: line.customer, mobile: line.mobile, amount: Number(payAmount), creditDate: line.date } })
                       .then(() => {
                         setPayAmount("");
                         setPayFor("");
@@ -704,7 +704,7 @@ function CounterAdvance({ onResult }: { onResult: (result: Result) => void }) {
       .then((book) => setOpen(book.open))
       .catch((error: unknown) => onResult({ ok: false, message: error instanceof Error ? error.message : "Advances did not open." }));
   };
-  useRefresh(load, 15000, []);
+  useRefresh(load, 60000, []);
 
   return (
     <section className="mt-4 rounded-xl border border-line bg-surface p-5">

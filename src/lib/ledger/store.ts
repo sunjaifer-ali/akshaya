@@ -81,8 +81,11 @@ function syncLeaves(state: Pick<LedgerData, "days" | "employees" | "holidays" | 
         if (previous && previous.code !== "LWP") marks.push(previous);
         continue;
       }
-      const code: LeaveCode = previous && previous.code !== "LWP" && previous.code !== "HD" ? previous.code : "LWP";
-      marks.push({ employeeId: employee.id, date: day.date, code });
+      if (previous && previous.code !== "LWP") {
+        marks.push(previous);
+        continue;
+      }
+      marks.push({ employeeId: employee.id, date: day.date, code: "LWP" });
     }
   }
   return marks;
@@ -344,6 +347,7 @@ export const useLedger = create<LedgerState>()(
               .filter((item) => item.amount > 0),
             countedBy: (close.countedBy ?? "").trim().slice(0, 80),
             accepted: Boolean(close.accepted),
+            draft: Boolean(close.draft) && !close.accepted,
             advanceHeld: rupee(close.advanceHeld ?? 0),
             advanceServed: rupee(close.advanceServed ?? 0),
             ...(typeof close.advanceIn === "number" ? { advanceIn: rupee(close.advanceIn) } : {}),

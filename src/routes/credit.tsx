@@ -57,7 +57,7 @@ function CreditPage() {
       .catch((error: unknown) => setNotice(error instanceof Error ? error.message : "Credit did not open."));
   };
 
-  useRefresh(load, 15000, [month]);
+  useRefresh(load, 60000, [month]);
 
   const givenLines = lines.filter((line) => line.kind === "credit" && (!day || line.date === day));
   const paidLines = lines.filter((line) => line.kind === "debit" && (!day || line.date === day));
@@ -162,7 +162,7 @@ function CreditPage() {
             <h3 className="mt-4 text-xs font-semibold tracking-widest text-faint">{formatMonth(group.month)}</h3>
             <ul className="divide-y divide-line">
               {group.rows.map((line) => (
-            <li key={`${line.customer}-${line.mobile}`} className="py-3 text-sm">
+            <li key={`${line.customer}-${line.mobile}-${line.date}-${line.balance}`} className="py-3 text-sm">
               <div className="flex items-center justify-between gap-3">
                 <span>
                   {line.customer}
@@ -178,7 +178,7 @@ function CreditPage() {
                     size="sm"
                     variant="secondary"
                     onClick={() => {
-                      setPayFor(line.customer);
+                      setPayFor(`${line.customer}|${line.date}`);
                       setWriteFor("");
                       setPayAmount(String(line.balance));
                       setPayMobile(line.mobile);
@@ -201,7 +201,7 @@ function CreditPage() {
                   ) : null}
                 </span>
               </div>
-              {payFor === line.customer ? (
+              {payFor === `${line.customer}|${line.date}` ? (
                 <form
                   className="mt-2 grid gap-2 sm:grid-cols-[8rem_1fr_auto]"
                   onSubmit={(event) => {
@@ -209,7 +209,7 @@ function CreditPage() {
                     setPending(true);
                     setNotice("");
                     void addCustomerMove({
-                      data: { kind: "debit", customer: line.customer, mobile: payMobile || line.mobile, amount: Number(payAmount) },
+                      data: { kind: "debit", customer: line.customer, mobile: payMobile || line.mobile, amount: Number(payAmount), creditDate: line.date },
                     })
                       .then(() => {
                         setPayFor("");
@@ -379,7 +379,7 @@ function AdvanceBlock({ month }: { month: string }) {
   const [servedDay, setServedDay] = useState("");
 
   const load = () => {
-    void advanceDesk()
+    void advanceDesk({ data: month })
       .then((next) => {
         setRole(next.role === "admin" ? "admin" : "employee");
         setHeld(next.held);
@@ -390,7 +390,7 @@ function AdvanceBlock({ month }: { month: string }) {
       .catch((error: unknown) => setResult({ ok: false, message: error instanceof Error ? error.message : "Advance did not open." }));
   };
 
-  useRefresh(load, 15000, []);
+  useRefresh(load, 60000, [month]);
 
   const servedMonth = paid.filter((line) => line.used.startsWith(month));
   const servedTotal = servedMonth.reduce((sum, line) => sum + line.amount, 0);

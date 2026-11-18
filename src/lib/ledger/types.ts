@@ -66,6 +66,8 @@ export type CashClose = {
   creditGiven: CreditGiven[];
   countedBy: string;
   accepted: boolean;
+  /** Kept for the admin only. Staff can still enter charges. */
+  draft?: boolean;
   advanceHeld?: number;
   advanceServed?: number;
   advanceIn?: number;

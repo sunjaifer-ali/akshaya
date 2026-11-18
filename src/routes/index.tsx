@@ -363,7 +363,7 @@ function morningReview(
   const yesterday = addDays(today, -1);
   if (!isSunday(yesterday) && !holidays.has(yesterday)) {
     const close = book.cashCloses.find((row) => row.date === yesterday);
-    if (!close || (!countStarted(close) && !close.accepted)) {
+    if (!close || close.draft || (!countStarted(close) && !close.accepted)) {
       items.push({ tone: "warn", text: "Yesterday was not closed.", to: "/closing", search: { d: yesterday } });
     } else {
       const check = checkClose(close, book.cashCloses, book.days, book.holidays, book.payouts ?? []);

@@ -36,7 +36,7 @@ function GpayPage() {
         setLines(book.lines);
       })
       .catch((error: unknown) => setNotice(error instanceof Error ? error.message : "Personal GPay did not open."));
-  }, 15000, [start, end]);
+  }, 45000, [start, end]);
 
   return (
     <div>
