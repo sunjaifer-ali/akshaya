@@ -81,8 +81,11 @@ function syncLeaves(state: Pick<LedgerData, "days" | "employees" | "holidays" | 
         if (previous && previous.code !== "LWP") marks.push(previous);
         continue;
       }
-      const code: LeaveCode = previous && previous.code !== "LWP" && previous.code !== "HD" ? previous.code : "LWP";
-      marks.push({ employeeId: employee.id, date: day.date, code });
+      if (previous && previous.code !== "LWP") {
+        marks.push(previous);
+        continue;
+      }
+      marks.push({ employeeId: employee.id, date: day.date, code: "LWP" });
     }
   }
   return marks;

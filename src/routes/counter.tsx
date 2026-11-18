@@ -71,7 +71,7 @@ function CounterPage() {
       .catch((error: unknown) => {
         if (seq === seen.current) setNotice(error instanceof Error ? error.message : "The counter did not open.");
       });
-  }, 15000, [day]);
+  }, 30000, [day]);
 
   const save = () => {
     setPending(true);
@@ -602,7 +602,7 @@ function CounterCredit({ month, onResult }: { month: string; onResult: (result: 
       })
       .catch((error: unknown) => onResult({ ok: false, message: error instanceof Error ? error.message : "Credit did not open." }));
   };
-  useRefresh(load, 15000, [month]);
+  useRefresh(load, 60000, [month]);
 
   return (
     <>
@@ -704,7 +704,7 @@ function CounterAdvance({ onResult }: { onResult: (result: Result) => void }) {
       .then((book) => setOpen(book.open))
       .catch((error: unknown) => onResult({ ok: false, message: error instanceof Error ? error.message : "Advances did not open." }));
   };
-  useRefresh(load, 15000, []);
+  useRefresh(load, 60000, []);
 
   return (
     <section className="mt-4 rounded-xl border border-line bg-surface p-5">

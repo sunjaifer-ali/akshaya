@@ -619,21 +619,31 @@ function addOpenCredit(
 
 function payOpenCredit(lines: OpenRow[], name: string, amount: number, date: string, mobile = "") {
   let left = Math.round(amount);
-  if (left <= 0) return;
-  const started = left;
-  const key = creditKey(name, mobile);
+  if (left <= 0 || !creditKey(name)) return;
+  const apply = (targets: OpenRow[]) => {
+    const ordered = [...targets.filter((line) => line.date === date), ...targets.filter((line) => line.date !== date)];
+    for (const line of ordered) {
+      if (left <= 0) break;
+      const take = Math.min(line.balance, left);
+      line.balance -= take;
+      left -= take;
+    }
+  };
   const open = () => lines.filter((line) => line.balance > 0);
-  const named = key ? open().filter((line) => line.key === key) : [];
-  const ordered = [...named.filter((line) => line.date === date), ...named.filter((line) => line.date !== date)];
-  for (const line of ordered) {
-    if (left <= 0) break;
-    const take = Math.min(line.balance, left);
-    line.balance -= take;
-    left -= take;
+  const exact = open().filter((line) => line.key === creditKey(name, mobile));
+  if (exact.length > 0) {
+    apply(exact);
+    return;
   }
-  if (left !== started) return;
-  const same = open().filter((line) => line.key === key && line.date === date && line.balance === left);
-  if (same.length === 1) same[0].balance = 0;
+  const named = open().filter((line) => creditKey(line.customer) === creditKey(name));
+  if (named.length === 1) {
+    apply(named);
+    return;
+  }
+  const sameAmount = named.filter((line) => line.balance === left);
+  const sameDay = sameAmount.filter((line) => line.date === date);
+  if (sameDay.length === 1) apply(sameDay);
+  else if (sameAmount.length === 1) apply(sameAmount);
 }
 
 function foldCredits(
@@ -681,11 +691,17 @@ function foldCredits(
         });
       }
     }
-    const payments =
-      debits.length > 0
-        ? debits.map((move) => ({ name: move.customer, mobile: move.mobile, amount: Number(move.amount) || 0 }))
-        : (close?.creditPaid ?? []).map((item) => ({ name: item.name ?? "", amount: item.amount || 0 }));
-    for (const item of payments) payOpenCredit(lines, item.name, item.amount, date, "mobile" in item ? String(item.mobile ?? "") : "");
+    const fromMoves = debits.map((move) => ({ name: move.customer, mobile: move.mobile, amount: Number(move.amount) || 0 }));
+    const fromClose = (close?.creditPaid ?? []).map((item) => ({ name: item.name ?? "", mobile: "", amount: item.amount || 0 }));
+    const covered = fromMoves.map((item) => ({ name: creditKey(item.name), amount: item.amount, used: false }));
+    const extras = fromClose.filter((item) => {
+      const hit = covered.find((row) => !row.used && row.name === creditKey(item.name) && row.amount === item.amount);
+      if (!hit) return true;
+      hit.used = true;
+      return false;
+    });
+    const payments = fromMoves.length > 0 ? [...fromMoves, ...extras] : fromClose;
+    for (const item of payments) payOpenCredit(lines, item.name, item.amount, date, item.mobile);
     for (const move of dayMoves.filter((item) => item.kind === "writeoff")) {
       payOpenCredit(lines, move.customer, Number(move.amount) || 0, date, move.mobile);
     }
@@ -703,7 +719,12 @@ function earliestMove(dates: string[]): string {
   return first;
 }
 
+let creditHealAt = 0;
+
 async function healStaleCredits(sql: Awaited<ReturnType<typeof import("@/lib/db").getSql>>) {
+  const now = Date.now();
+  if (now - creditHealAt < 10 * 60 * 1000) return;
+  creditHealAt = now;
   const preview = await sql<{ data: LedgerData | string }>`select data from centre_book where id = 'centre'`;
   const seen = preview[0] ? asJson(preview[0].data) : null;
   if (!seen) return;
@@ -933,14 +954,19 @@ export type OpenAdvance = {
 
 export const advanceDesk = createServerFn({ method: "GET" })
   .middleware([authMiddleware])
-  .handler(async ({ context }) => {
+  .validator((month?: string) => {
+    const value = typeof month === "string" ? month : "";
+    if (value && !/^\d{4}-\d{2}$/.test(value)) throw new Error("Pick a month.");
+    return value;
+  })
+  .handler(async ({ context, data: month }) => {
     const role = await requireMember(context.userId);
     const { getSql } = await import("@/lib/db");
     const sql = await getSql();
     await ensureAdvanceTable(sql);
     const date = indiaToday();
     const open = await openAdvances(sql, context.userId);
-    const paid = role === "admin" ? await paidAdvances(sql) : [];
+    const paid = role === "admin" && month ? await paidAdvances(sql, month) : [];
     const received = await sql<{ total: number }>`
       select coalesce(sum(amount), 0)::int as total from customer_advance where taken_on = ${date}
     `;
@@ -973,8 +999,12 @@ async function readClosingAdvance(sql: Awaited<ReturnType<typeof import("@/lib/d
     const bookRow = await sql<{ data: LedgerData | string }>`select data from centre_book where id = 'centre'`;
     const book = bookRow[0] ? asJson(bookRow[0].data) : null;
     const last = [...(book?.cashCloses ?? [])].filter((item) => item.date < date).sort((a, b) => (a.date < b.date ? -1 : 1)).at(-1);
+    const lastDate = last?.date ?? "";
+    const since = lastDate || date;
     const rows = await sql<{ id: string; taken_on: string; used_on: string | null; staff_name: string; customer: string; mobile: string; service: string; amount: number }>`
-      select id, taken_on::text as taken_on, used_on::text as used_on, staff_name, customer, mobile, service, amount from customer_advance
+      select id, taken_on::text as taken_on, used_on::text as used_on, staff_name, customer, mobile, service, amount
+      from customer_advance
+      where used_on is null or used_on > ${since} or taken_on = ${date} or used_on = ${date}
     `;
     const heldOf = (asOf: string) =>
       rows.reduce((sum, row) => {
@@ -1011,8 +1041,6 @@ async function readClosingAdvance(sql: Awaited<ReturnType<typeof import("@/lib/d
       }));
     const received = rows.reduce((sum, row) => (dayText(row.taken_on) === date ? sum + Number(row.amount) : sum), 0);
     const used = rows.reduce((sum, row) => (row.used_on && dayText(row.used_on) === date ? sum + Number(row.amount) : sum), 0);
-    const lastDate = last?.date ?? "";
-    // These two are only this date. A later closing must not pick them up again.
     const taken = received;
     const served = used;
     return { held: heldOf(date), lastDate, lastHeld: last ? heldOf(last.date) : 0, received, used, served, taken, open, paid, tracked: rows.length > 0 };
@@ -1042,23 +1070,67 @@ export const closingDesk = createServerFn({ method: "GET" })
     const advance = await readClosingAdvance(sql, date);
     const payouts = (await readPayouts(sql, context.userId)).map(({ mine: _mine, ...item }) => item);
     const from = shiftDay(date, -40);
-    const gpay = await sql<{ taken_on: string; service: number; department: number }>`
+    const counter = await sql<{ taken_on: string; amount: number; personal: number; department: number; bank: number }>`
       select taken_on::text as taken_on,
-        coalesce(sum(amount), 0)::int as service,
-        coalesce(sum(department), 0)::int as department
+        coalesce(sum(amount), 0)::int as amount,
+        coalesce(sum(case when personal_gpay then amount else 0 end), 0)::int as personal,
+        coalesce(sum(case when personal_gpay then department else 0 end), 0)::int as department,
+        coalesce(sum(bank_department), 0)::int as bank
       from service_entry
-      where personal_gpay and taken_on >= ${from} and taken_on <= ${date}
+      where taken_on >= ${from} and taken_on <= ${date}
       group by taken_on
     `;
+    const creditDays = await sql<{ taken_on: string; kind: string; amount: number }>`
+      select taken_on::text as taken_on, kind, coalesce(sum(amount), 0)::int as amount
+      from customer_move
+      where taken_on >= ${from} and taken_on <= ${date} and kind in ('credit', 'debit')
+      group by taken_on, kind
+    `;
+    const advanceInDays = await sql<{ taken_on: string; amount: number }>`
+      select taken_on::text as taken_on, coalesce(sum(amount), 0)::int as amount
+      from customer_advance
+      where taken_on >= ${from} and taken_on <= ${date}
+      group by taken_on
+    `;
+    const advanceOutDays = await sql<{ used_on: string; amount: number }>`
+      select used_on::text as used_on, coalesce(sum(amount), 0)::int as amount
+      from customer_advance
+      where used_on >= ${from} and used_on <= ${date}
+      group by used_on
+    `;
+    const movements = new Map<string, { credit: number; repaid: number; advanceIn: number; advanceServed: number }>();
+    const movement = (day: string) => movements.get(day) ?? { credit: 0, repaid: 0, advanceIn: 0, advanceServed: 0 };
+    for (const row of creditDays) {
+      const day = String(row.taken_on).slice(0, 10);
+      const next = movement(day);
+      if (row.kind === "debit") next.repaid = Number(row.amount) || 0;
+      else next.credit = Number(row.amount) || 0;
+      movements.set(day, next);
+    }
+    for (const row of advanceInDays) {
+      const day = String(row.taken_on).slice(0, 10);
+      const next = movement(day);
+      next.advanceIn = Number(row.amount) || 0;
+      movements.set(day, next);
+    }
+    for (const row of advanceOutDays) {
+      const day = String(row.used_on).slice(0, 10);
+      const next = movement(day);
+      next.advanceServed = Number(row.amount) || 0;
+      movements.set(day, next);
+    }
     return {
       credit: { given: position.given, paid: position.paid, unpaid: position.unpaid },
       advance,
       payouts,
-      gpay: gpay.map((row) => ({
+      counter: counter.map((row) => ({
         date: String(row.taken_on).slice(0, 10),
-        service: Number(row.service) || 0,
+        amount: Number(row.amount) || 0,
+        personal: Number(row.personal) || 0,
         department: Number(row.department) || 0,
+        bank: Number(row.bank) || 0,
       })),
+      movements: [...movements.entries()].map(([day, item]) => ({ date: day, ...item })),
     };
   });
 
@@ -1239,10 +1311,17 @@ export const updateAdvance = createServerFn({ method: "POST" })
     return { ok: true };
   });
 
-async function paidAdvances(sql: Awaited<ReturnType<typeof import("@/lib/db").getSql>>): Promise<PaidAdvance[]> {
+async function paidAdvances(sql: Awaited<ReturnType<typeof import("@/lib/db").getSql>>, month: string): Promise<PaidAdvance[]> {
+  if (!/^\d{4}-\d{2}$/.test(month)) return [];
+  const start = `${month}-01`;
+  const [year, monthNo] = month.split("-").map(Number);
+  const end = monthNo === 12 ? `${year + 1}-01-01` : `${year}-${String(monthNo + 1).padStart(2, "0")}-01`;
   const rows = await sql<{ id: string; taken_on: string; used_on: string; staff_name: string; customer: string; mobile: string; service: string; amount: number }>`
     select id, taken_on::text as taken_on, used_on::text as used_on, staff_name, customer, mobile, service, amount
-    from customer_advance where used_on is not null order by used_on desc, created_at desc
+    from customer_advance
+    where used_on is not null
+      and ((taken_on >= ${start} and taken_on < ${end}) or (used_on >= ${start} and used_on < ${end}))
+    order by used_on desc, created_at desc
   `;
   return rows.map((row) => ({
     id: row.id,
@@ -1366,7 +1445,12 @@ function servedSince(
   }, 0);
 }
 
+let advanceReleaseAt = 0;
+
 async function releaseAdvanceCharges(sql: Awaited<ReturnType<typeof import("@/lib/db").getSql>>): Promise<string[]> {
+  const now = Date.now();
+  if (now - advanceReleaseAt < 10 * 60 * 1000) return [];
+  advanceReleaseAt = now;
   await ensureServiceTable(sql);
   const rows = await sql<{ taken_on: string }>`
     select e.taken_on::text as taken_on
@@ -2071,18 +2155,28 @@ export const updateServiceEntry = createServerFn({ method: "POST" })
     return { ok: true };
   });
 
+async function closeOn(sql: Awaited<ReturnType<typeof import("@/lib/db").getSql>>, date: string): Promise<CashClose | null> {
+  const rows = await sql<{ close: CashClose | string | null }>`
+    select c.value as close
+    from centre_book,
+    lateral jsonb_array_elements(coalesce(data->'cashCloses', '[]'::jsonb)) as c(value)
+    where id = 'centre' and c.value->>'date' = ${date}
+    limit 1
+  `;
+  const close = rows[0]?.close;
+  if (!close) return null;
+  return typeof close === "string" ? (JSON.parse(close) as CashClose) : close;
+}
+
 async function dayIsClosed(sql: Awaited<ReturnType<typeof import("@/lib/db").getSql>>, date: string) {
-  const current = await sql<{ data: LedgerData | string }>`select data from centre_book where id = 'centre'`;
-  const book = current[0] ? asJson(current[0].data) : null;
-  const close = (book?.cashCloses ?? []).find((item) => item.date === date);
+  const close = await closeOn(sql, date);
   if (!close) return false;
   return Boolean(close.accepted) || (countStarted(close) && !close.draft);
 }
 
 async function dayIsAccepted(sql: Awaited<ReturnType<typeof import("@/lib/db").getSql>>, date: string) {
-  const current = await sql<{ data: LedgerData | string }>`select data from centre_book where id = 'centre'`;
-  const book = current[0] ? asJson(current[0].data) : null;
-  return Boolean((book?.cashCloses ?? []).find((close) => close.date === date)?.accepted);
+  const close = await closeOn(sql, date);
+  return Boolean(close?.accepted);
 }
 
 async function ensureLoginTable(sql: Awaited<ReturnType<typeof import("@/lib/db").getSql>>) {
@@ -3127,7 +3221,7 @@ function applyImportedLeave(book: LedgerData, date: string): LedgerData {
       if (previous && previous.code !== "LWP") leaves.push(previous);
       continue;
     }
-    if (previous && previous.code !== "LWP" && previous.code !== "HD") continue;
+    if (previous && previous.code !== "LWP") continue;
     leaves = leaves.filter((mark) => mark.employeeId !== employee.id || mark.date !== date);
     leaves.push({ employeeId: employee.id, date, code: "LWP" });
   }

@@ -57,7 +57,7 @@ function CreditPage() {
       .catch((error: unknown) => setNotice(error instanceof Error ? error.message : "Credit did not open."));
   };
 
-  useRefresh(load, 15000, [month]);
+  useRefresh(load, 60000, [month]);
 
   const givenLines = lines.filter((line) => line.kind === "credit" && (!day || line.date === day));
   const paidLines = lines.filter((line) => line.kind === "debit" && (!day || line.date === day));
@@ -379,7 +379,7 @@ function AdvanceBlock({ month }: { month: string }) {
   const [servedDay, setServedDay] = useState("");
 
   const load = () => {
-    void advanceDesk()
+    void advanceDesk({ data: month })
       .then((next) => {
         setRole(next.role === "admin" ? "admin" : "employee");
         setHeld(next.held);
@@ -390,7 +390,7 @@ function AdvanceBlock({ month }: { month: string }) {
       .catch((error: unknown) => setResult({ ok: false, message: error instanceof Error ? error.message : "Advance did not open." }));
   };
 
-  useRefresh(load, 15000, []);
+  useRefresh(load, 60000, [month]);
 
   const servedMonth = paid.filter((line) => line.used.startsWith(month));
   const servedTotal = servedMonth.reduce((sum, line) => sum + line.amount, 0);
