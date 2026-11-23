@@ -2703,7 +2703,7 @@ async function keepDailyBackup(
 
 async function trimStoredRows(sql: Awaited<ReturnType<typeof import("@/lib/db").getSql>>) {
   await ensureLoginTable(sql);
-  await sql.query(`delete from login_log where at < now() - interval '180 days'`);
+  await sql.query(`delete from login_log where at < now() - interval '30 days'`);
   await sql.query(`delete from "session" where "expiresAt" < now() - interval '1 day'`).catch(() => undefined);
   await sql.query(`delete from "verification" where "expiresAt" < now() - interval '1 day'`).catch(() => undefined);
 }
